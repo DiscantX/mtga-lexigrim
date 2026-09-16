@@ -1,4 +1,5 @@
 import os
+import sys
 import json
 import functools
 import time
@@ -212,50 +213,54 @@ def qdrant_consumer_worker(q: queue.Queue, timer: IngestionTimer, error_holder: 
 
 def ingest_cards_to_qdrant(file_path: str):
     timer = IngestionTimer()
-    
-    print("Checking database for existing cards to enable resume state...")
-    with timer.measure("Fetch Existing Card IDs"):
-        existing_ids = set()
-        try:
-            offset = None
-            while True:
-                scroll_res, offset = qclient.scroll(
-                    collection_name="mtg_cards",
-                    with_payload=False,
-                    with_vectors=False,
-                    limit=1000,
-                    offset=offset
-                )
-                for point in scroll_res:
-                    existing_ids.add(point.id)
-                if not offset:
-                    break
-            print(f"Found {len(existing_ids):,} cards already indexed. Skipping these automatically.")
-        except Exception:
-            print("No prior collection records found. Starting fresh ingestion.")
-
-    print("Disabling Qdrant indexing threshold for fast bulk ingestion...")
-    qclient.update_collection(
-        collection_name="mtg_cards",
-        optimizer_config=models.OptimizersConfigDiff(indexing_threshold=1000000)
-    )
-
-    print("Pre-scanning dataset to determine total cards...")
-    with timer.measure("Pre-scan Line Count"):
-        with open(file_path, "r", encoding="utf-8") as f:
-            total_cards = sum(1 for _ in f)
-
-    # Initialize Queue and Background Consumer Worker Thread immediately after pre-scan line count
-    card_queue = queue.Queue(maxsize=QUEUE_MAXSIZE)
-    error_holder = []
-    consumer_thread = threading.Thread(
-        target=qdrant_consumer_worker,
-        args=(card_queue, timer, error_holder),
-        daemon=True
-    )
-    consumer_thread.start()
+    consumer_thread = None
+    card_queue = None
+    threshold_modified = False
 
     try:
+        print("Checking database for existing cards to enable resume state...")
+        with timer.measure("Fetch Existing Card IDs"):
+            existing_ids = set()
+            try:
+                offset = None
+                while True:
+                    scroll_res, offset = qclient.scroll(
+                        collection_name="mtg_cards",
+                        with_payload=False,
+                        with_vectors=False,
+                        limit=1000,
+                        offset=offset
+                    )
+                    for point in scroll_res:
+                        existing_ids.add(point.id)
+                    if not offset:
+                        break
+                print(f"Found {len(existing_ids):,} cards already indexed. Skipping these automatically.")
+            except Exception:
+                print("No prior collection records found. Starting fresh ingestion.")
+
+        print("Disabling Qdrant indexing threshold for fast bulk ingestion...")
+        qclient.update_collection(
+            collection_name="mtg_cards",
+            optimizer_config=models.OptimizersConfigDiff(indexing_threshold=1000000)
+        )
+        threshold_modified = True
+
+        print("Pre-scanning dataset to determine total cards...")
+        with timer.measure("Pre-scan Line Count"):
+            with open(file_path, "r", encoding="utf-8") as f:
+                total_cards = sum(1 for _ in f)
+
+        # Initialize Queue and Background Consumer Worker Thread immediately after pre-scan line count
+        card_queue = queue.Queue(maxsize=QUEUE_MAXSIZE)
+        error_holder = []
+        consumer_thread = threading.Thread(
+            target=qdrant_consumer_worker,
+            args=(card_queue, timer, error_holder),
+            daemon=True
+        )
+        consumer_thread.start()
+
         processed_this_run = 0
         current_embedding_batch = []
         
@@ -298,18 +303,36 @@ def ingest_cards_to_qdrant(file_path: str):
                 pbar.update(len(current_embedding_batch))
 
         # Signal completion to consumer worker
-        card_queue.put(None)
-        consumer_thread.join()
+        if card_queue:
+            card_queue.put(None)
+        if consumer_thread and consumer_thread.is_alive():
+            consumer_thread.join()
 
         if error_holder:
             raise error_holder[0]
 
+    except KeyboardInterrupt:
+        print("\n[!] Safe exit requested (Ctrl+C). Cleaning up and shutting down...")
+        if card_queue:
+            try:
+                card_queue.put(None)
+            except Exception:
+                pass
+        if consumer_thread and consumer_thread.is_alive():
+            print("Waiting for background upsert worker to finish pending batch...")
+            consumer_thread.join(timeout=5.0)
+        sys.exit(0)
+
     finally:
-        print("Restoring Qdrant indexing threshold (20000)...")
-        qclient.update_collection(
-            collection_name="mtg_cards",
-            optimizer_config=models.OptimizersConfigDiff(indexing_threshold=20000)
-        )
+        if threshold_modified:
+            print("Restoring Qdrant indexing threshold (20000)...")
+            try:
+                qclient.update_collection(
+                    collection_name="mtg_cards",
+                    optimizer_config=models.OptimizersConfigDiff(indexing_threshold=20000)
+                )
+            except Exception:
+                pass
         timer.report()
 
 if __name__ == "__main__":

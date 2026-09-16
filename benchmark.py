@@ -1,5 +1,6 @@
 import time
 import itertools
+import sys
 from fastembed import TextEmbedding
 
 # 1. Define the testing grid aligned with codebase defaults (FE_THREADS = 4, EMBEDDING_BATCH_SIZE = 4)
@@ -406,4 +407,8 @@ def run_benchmark():
     print(f"\nGrid search complete! Final leaderboard compiled inside '{OUTPUT_FILENAME}'")
 
 if __name__ == "__main__":
-    run_benchmark()
+    try:
+        run_benchmark()
+    except KeyboardInterrupt:
+        print("\n[!] Exiting benchmark safely...")
+        sys.exit(0)
