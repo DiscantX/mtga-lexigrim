@@ -8,6 +8,12 @@ class JsonlStreamReader:
         self.file_path = file_path
         self.chunk_size = chunk_size
 
+    @staticmethod
+    def count_lines(file_path: str) -> int:
+        """Count total lines in a JSONL file efficiently."""
+        with open(file_path, "r", encoding="utf-8") as f:
+            return sum(1 for _ in f)
+
     def stream(self, skipped_items: Optional[List[Dict[str, Any]]] = None) -> Generator[Tuple[Dict[str, Any], int], None, None]:
         if skipped_items is None:
             skipped_items = []
