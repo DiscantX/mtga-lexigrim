@@ -1,27 +1,46 @@
-print("Importing modules...")
-
 import argparse
 import sys
-from ingest import ingest_cards_to_qdrant
-from search import run_interactive_search
+from config.settings import Settings
+from vectorstores.service_manager import QdrantServiceManager
+from vectorstores.qdrant import QdrantVectorStore
+from embeddings.fastembed_provider import FastEmbedProvider
+from search.engine import CardSearchEngine
+from search.cli import InteractiveSearchCLI
+from ingestion.pipeline import IngestionPipeline
+from core.timer import IngestionTimer
 
-JSONL_PATH = 'corpus/default-cards-20260915210531.jsonl'
-
-def main():
-    print("Parsing args...")
+def main() -> None:
     parser = argparse.ArgumentParser(description="MTG Expert: Ingestion & Interactive Search CLI")
-    parser.add_argument("-s", "--search", action="store_true", help="Activate interactive search and narrowing mode")
-    parser.add_argument("--results", "--r", type=int, default=3, help="Number of results to display in search mode (default: 3)")
+    parser.add_argument("-s", "--search", action="store_true", help="Launch interactive search REPL")
+    parser.add_argument("-r", "--results", type=int, default=3, help="Default result limit for search")
+    parser.add_argument("--corpus", type=str, help="Path to card corpus JSONL for ingestion")
     
     args = parser.parse_args()
-
+    
+    settings = Settings()
+    
     try:
-        if args.search:
-            print("Opening interactive search...")
-            run_interactive_search(display_limit=args.results)
+        if args.corpus:
+            print(f"Starting data ingestion from {args.corpus}...")
+            service_manager = QdrantServiceManager(host=settings.qdrant_host, port=settings.qdrant_port)
+            service_manager.ensure_running()
+            vector_store = QdrantVectorStore(host=settings.qdrant_host, port=settings.qdrant_port, collection_name=settings.qdrant_collection_name)
+            vector_store.initialize_schema()
+            embedding_service = FastEmbedProvider(model_name=settings.embedding_model_name)
+            timer = IngestionTimer()
+            pipeline = IngestionPipeline(vector_store, embedding_service, timer, settings)
+            pipeline.run(args.corpus)
+        elif args.search:
+            print("Launching interactive search REPL...")
+            service_manager = QdrantServiceManager(host=settings.qdrant_host, port=settings.qdrant_port)
+            service_manager.ensure_running()
+            vector_store = QdrantVectorStore(host=settings.qdrant_host, port=settings.qdrant_port, collection_name=settings.qdrant_collection_name)
+            embedding_service = FastEmbedProvider(model_name=settings.embedding_model_name)
+            engine = CardSearchEngine(vector_store, embedding_service)
+            cli = InteractiveSearchCLI(engine, default_limit=args.results)
+            cli.run()
         else:
-            print("Starting data ingestion...")
-            ingest_cards_to_qdrant(JSONL_PATH)
+            parser.print_help()
     except KeyboardInterrupt:
         print("\n[!] Exiting safely...")
         sys.exit(0)
