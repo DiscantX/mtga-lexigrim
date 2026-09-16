@@ -2,6 +2,8 @@ import os
 import json
 import functools
 import time
+import threading
+import queue
 from contextlib import contextmanager
 from collections import defaultdict
 from qdrant_client import QdrantClient, models
@@ -14,18 +16,22 @@ ensure_qdrant_running()
 
 JSONL_PATH = 'corpus/default-cards-20260915210531.jsonl'
 MODEL_NAME = "nomic-ai/nomic-embed-text-v1.5"
-BATCH_SIZE = 16  # Safe memory-friendly batch size for low-end laptops
+EMBEDDING_BATCH_SIZE = 4
+UPSERT_BATCH_SIZE = 128
 FE_THREADS = 4
+QUEUE_MAXSIZE = 1000
+REPORT_INTERVAL = 50
 
 qclient = QdrantClient(host="localhost", port=6333)
 
-# Initialize FastEmbed TextEmbedding model with restricted thread count (2 threads) to prevent CPU/memory freezing
+# Initialize FastEmbed TextEmbedding model with 4 threads
 embedding_model = TextEmbedding(model_name=MODEL_NAME, threads=FE_THREADS)
 
 class IngestionTimer:
     def __init__(self):
         self.timings = defaultdict(float)
         self.counts = defaultdict(int)
+        self.lock = threading.Lock()
 
     @contextmanager
     def measure(self, name: str):
@@ -34,18 +40,23 @@ class IngestionTimer:
             yield
         finally:
             elapsed = time.perf_counter() - start
-            self.timings[name] += elapsed
-            self.counts[name] += 1
+            with self.lock:
+                self.timings[name] += elapsed
+                self.counts[name] += 1
 
     def get_avg(self, name: str) -> float:
-        count = self.counts[name]
-        return self.timings[name] / count if count > 0 else 0.0
+        with self.lock:
+            count = self.counts[name]
+            return self.timings[name] / count if count > 0 else 0.0
 
     def report(self):
         tqdm.write("\n=== Ingestion Pipeline Performance Report ===")
-        total_time = sum(self.timings.values())
-        for name, duration in sorted(self.timings.items(), key=lambda x: x[1], reverse=True):
-            count = self.counts[name]
+        with self.lock:
+            total_time = sum(self.timings.values())
+            timings_snapshot = dict(self.timings)
+            counts_snapshot = dict(self.counts)
+        for name, duration in sorted(timings_snapshot.items(), key=lambda x: x[1], reverse=True):
+            count = counts_snapshot[name]
             avg = duration / count if count > 0 else 0
             pct = (duration / total_time * 100) if total_time > 0 else 0
             tqdm.write(f"  - {name}: {duration:.3f}s total ({count} calls, avg {avg:.4f}s, {pct:.1f}%)")
@@ -110,8 +121,8 @@ def extract_clean_payload(card: dict) -> dict:
 embedding_cache: dict[str, list[float]] = {}
 MAX_CACHE_SIZE = 5000
 
-def process_and_upsert_batch(batch_cards, timer: IngestionTimer):
-    """Batches text strings together, checks bounded in-memory cache, generates embeddings using FastEmbed for novel texts, and upserts with Windows safety retries."""
+def process_batch(batch_cards, timer: IngestionTimer) -> list[models.PointStruct]:
+    """Batches text strings together, checks bounded in-memory cache, generates embeddings using FastEmbed for novel texts, and prepares PointStruct objects."""
     global embedding_cache
     with timer.measure("Text Formatting & Cache Lookup"):
         card_texts = [(card, extract_embedding_text(card)) for card in batch_cards]
@@ -125,11 +136,9 @@ def process_and_upsert_batch(batch_cards, timer: IngestionTimer):
             
     if novel_texts:
         with timer.measure("FastEmbed Generation"):
-            # FastEmbed Batch Embedding Call for novel texts only
             new_embeddings = [list(vec) for vec in embedding_model.embed(novel_texts)]
         for text, vec in zip(novel_texts, new_embeddings):
             if len(embedding_cache) >= MAX_CACHE_SIZE:
-                # Evict oldest entry if cache is full
                 embedding_cache.pop(next(iter(embedding_cache)))
             embedding_cache[text] = vec
     
@@ -142,26 +151,64 @@ def process_and_upsert_batch(batch_cards, timer: IngestionTimer):
                 vector=vector,
                 payload=extract_clean_payload(card)
             ))
-        
-    # 🛠️ WINDOWS RESILIENCE BLOCK: Retry writes if Windows locks a file handle temporarily
-    with timer.measure("Qdrant Upsert"):
-        for attempt in range(5):
+    return points
+
+def qdrant_consumer_worker(q: queue.Queue, timer: IngestionTimer, error_holder: list):
+    """Dedicated background worker thread for sequential Qdrant upserts with buffering and timeout flushing."""
+    buffer = []
+    try:
+        while True:
             try:
-                qclient.upsert(collection_name="mtg_cards", points=points)
-                break # Success! Exit the retry block
-            except Exception as e:
-                if attempt == 4: # If it fails 5 times, raise the error
-                    raise e
-                # Pause briefly to allow the Windows file system thread to release the lock
-                time.sleep(0.2) 
+                item = q.get(timeout=2.0)
+            except queue.Empty:
+                if buffer:
+                    with timer.measure("Qdrant Upsert"):
+                        for attempt in range(5):
+                            try:
+                                qclient.upsert(collection_name="mtg_cards", points=buffer)
+                                break
+                            except Exception as e:
+                                if attempt == 4:
+                                    raise e
+                                time.sleep(0.2)
+                    buffer = []
+                continue
+
+            if item is None:
+                # Sentinel received: flush remaining buffer and exit
+                if buffer:
+                    with timer.measure("Qdrant Upsert"):
+                        for attempt in range(5):
+                            try:
+                                qclient.upsert(collection_name="mtg_cards", points=buffer)
+                                break
+                            except Exception as e:
+                                if attempt == 4:
+                                    raise e
+                                time.sleep(0.2)
+                    buffer = []
+                break
+
+            buffer.extend(item)
+            if len(buffer) >= UPSERT_BATCH_SIZE:
+                batch_to_upsert = buffer[:UPSERT_BATCH_SIZE]
+                buffer = buffer[UPSERT_BATCH_SIZE:]
+                with timer.measure("Qdrant Upsert"):
+                    for attempt in range(5):
+                        try:
+                            qclient.upsert(collection_name="mtg_cards", points=batch_to_upsert)
+                            break
+                        except Exception as e:
+                            if attempt == 4:
+                                raise e
+                            time.sleep(0.2)
+    except Exception as e:
+        error_holder.append(e)
 
 def ingest_cards_to_qdrant(file_path: str):
     timer = IngestionTimer()
-    current_batch = []
     
     print("Checking database for existing cards to enable resume state...")
-    # Fetch existing IDs to prevent rewriting (handles future updates/crashes instantly)
-    # We scroll through existing points completely using a lightweight payload-free stream
     with timer.measure("Fetch Existing Card IDs"):
         existing_ids = set()
         try:
@@ -207,24 +254,33 @@ def ingest_cards_to_qdrant(file_path: str):
     total_pending = len(pending_cards)
     print(f"Dataset stats: {total_cards:,} total cards | {skipped_existing:,} already in DB | {total_pending:,} to process.")
 
+    # Initialize Queue and Background Consumer Worker Thread
+    card_queue = queue.Queue(maxsize=QUEUE_MAXSIZE)
+    error_holder = []
+    consumer_thread = threading.Thread(
+        target=qdrant_consumer_worker,
+        args=(card_queue, timer, error_holder),
+        daemon=True
+    )
+    consumer_thread.start()
+
     try:
         processed_this_run = 0
+        current_embedding_batch = []
         with tqdm(total=total_pending, unit="cards", desc="Ingesting MTG Cards", dynamic_ncols=True) as pbar:
             for card_obj in pending_cards:
-                current_batch.append(card_obj)
+                current_embedding_batch.append(card_obj)
 
-                # Process when batch is filled
-                if len(current_batch) >= BATCH_SIZE:
-                    process_and_upsert_batch(current_batch, timer)
-                    processed_this_run += len(current_batch)
+                if len(current_embedding_batch) >= EMBEDDING_BATCH_SIZE:
+                    points = process_batch(current_embedding_batch, timer)
+                    card_queue.put(points) # blocks if queue maxsize reached (backpressure)
                     
-                    # Print periodic intermediate report every 50 batches
-                    batches_run = processed_this_run // BATCH_SIZE
-                    if batches_run % 50 == 0:
-                        timer.report()
+                    processed_this_run += len(current_embedding_batch)
+                    pbar.update(len(current_embedding_batch))
+                    current_embedding_batch = []
 
-                    pbar.update(len(current_batch))
-                    current_batch = []
+                if error_holder:
+                    raise error_holder[0]
 
                 pbar.set_postfix({
                     "Total DB": len(existing_ids) + processed_this_run,
@@ -233,16 +289,20 @@ def ingest_cards_to_qdrant(file_path: str):
                     "Upsert/b": f"{timer.get_avg('Qdrant Upsert'):.2f}s"
                 })
 
-            # Catch remaining stray points
-            if current_batch:
-                process_and_upsert_batch(current_batch, timer)
-                processed_this_run += len(current_batch)
-                pbar.update(len(current_batch))
-                pbar.set_postfix({
-                    "Total DB": len(existing_ids) + processed_this_run,
-                    "Embed/b": f"{timer.get_avg('FastEmbed Generation'):.2f}s",
-                    "Upsert/b": f"{timer.get_avg('Qdrant Upsert'):.2f}s"
-                })
+            # Catch remaining stray cards
+            if current_embedding_batch:
+                points = process_batch(current_embedding_batch, timer)
+                card_queue.put(points)
+                processed_this_run += len(current_embedding_batch)
+                pbar.update(len(current_embedding_batch))
+
+        # Signal completion to consumer worker
+        card_queue.put(None)
+        consumer_thread.join()
+
+        if error_holder:
+            raise error_holder[0]
+
     finally:
         print("Restoring Qdrant indexing threshold (20000)...")
         qclient.update_collection(
