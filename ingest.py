@@ -313,6 +313,68 @@ def ingest_cards_to_qdrant(file_path: str):
         if error_holder:
             raise error_holder[0]
 
+        print("\nVerifying ingestion completeness...")
+        with timer.measure("Post-Ingestion Verification"):
+            db_ids = set()
+            try:
+                offset = None
+                while True:
+                    scroll_res, offset = qclient.scroll(
+                        collection_name="mtg_cards",
+                        with_payload=False,
+                        with_vectors=False,
+                        limit=1000,
+                        offset=offset
+                    )
+                    for point in scroll_res:
+                        db_ids.add(point.id)
+                    if not offset:
+                        break
+            except Exception as e:
+                print(f"[WARNING] Could not fetch DB IDs for verification: {e}")
+
+            jsonl_cards = []
+            for card_obj, _ in stream_objects_with_pos(file_path):
+                jsonl_cards.append(card_obj)
+            
+            missed_cards = [card for card in jsonl_cards if card["id"] not in db_ids]
+
+        if missed_cards:
+            print(f"[VERIFICATION] Found {len(missed_cards)} missed cards. Automatically re-ingesting...")
+            card_queue = queue.Queue(maxsize=QUEUE_MAXSIZE)
+            error_holder = []
+            consumer_thread = threading.Thread(
+                target=qdrant_consumer_worker,
+                args=(card_queue, timer, error_holder),
+                daemon=True
+            )
+            consumer_thread.start()
+
+            current_embedding_batch = []
+            with tqdm(total=len(missed_cards), unit="cards", desc="Re-ingesting Missed Cards", dynamic_ncols=True) as pbar:
+                for card_obj in missed_cards:
+                    current_embedding_batch.append(card_obj)
+                    if len(current_embedding_batch) >= EMBEDDING_BATCH_SIZE:
+                        points = process_batch(current_embedding_batch, timer)
+                        card_queue.put(points)
+                        pbar.update(len(current_embedding_batch))
+                        current_embedding_batch = []
+                    if error_holder:
+                        raise error_holder[0]
+                if current_embedding_batch:
+                    points = process_batch(current_embedding_batch, timer)
+                    card_queue.put(points)
+                    pbar.update(len(current_embedding_batch))
+
+            card_queue.put(None)
+            if consumer_thread and consumer_thread.is_alive():
+                consumer_thread.join()
+            if error_holder:
+                raise error_holder[0]
+            print("[VERIFICATION] Re-ingestion of missed cards completed successfully.")
+        else:
+            print("[VERIFICATION] Zero missed cards detected. Ingestion is 100% complete!")
+
     except KeyboardInterrupt:
         print("\n[!] Safe exit requested (Ctrl+C). Cleaning up and shutting down...")
         if card_queue:
