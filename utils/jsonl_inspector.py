@@ -32,6 +32,7 @@ def stream_objects_with_pos(file_path: str, chunk_size: int = 65536):
                     card_obj, index = decoder.raw_decode(buffer)
                     yield card_obj, bytes_read
                     buffer = buffer[index:]  # Advance past parsed object
+                    print(card_obj["scryfall_set_uri"])
                 except json.JSONDecodeError:
                     # Incomplete JSON object at end of buffer; read next chunk
                     break
