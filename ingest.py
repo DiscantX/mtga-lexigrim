@@ -139,12 +139,17 @@ def process_batch(batch_cards, timer: IngestionTimer) -> list[models.PointStruct
             new_embeddings = [list(vec) for vec in embedding_model.embed(novel_texts)]
         for text, vec in zip(novel_texts, new_embeddings):
             if len(embedding_cache) >= MAX_CACHE_SIZE:
-                embedding_cache.pop(next(iter(embedding_cache)))
+                evicted_key = next(iter(embedding_cache))
+                print(f"[DEBUG] Cache limit reached ({MAX_CACHE_SIZE}). Evicting key: {evicted_key[:50]}...")
+                embedding_cache.pop(evicted_key)
             embedding_cache[text] = vec
     
     with timer.measure("Payload Cleaning & Point Prep"):
         points = []
         for card, text in card_texts:
+            if text not in embedding_cache:
+                print(f"[RECOVERY] Re-embedding missing text for card {card.get('name')}: {text[:100]}...")
+                embedding_cache[text] = list(embedding_model.embed([text]))[0]
             vector = embedding_cache[text]
             points.append(models.PointStruct(
                 id=card["id"],
