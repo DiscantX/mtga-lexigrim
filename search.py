@@ -1,29 +1,34 @@
 import sys
-import ollama
+from fastembed import TextEmbedding
 from qdrant_client import QdrantClient, models
 from qdrant_manager import ensure_qdrant_running
 
 # Automatically handles database initialization/state check
 ensure_qdrant_running()
 
-MODEL_NAME = "nomic-embed-text"
+MODEL_NAME = "nomic-ai/nomic-embed-text-v1.5"
 
 # Connect to your local running Qdrant .exe
 qclient = QdrantClient(host="localhost", port=6333)
 
+# Initialize FastEmbed TextEmbedding model
+embedding_model = TextEmbedding(model_name=MODEL_NAME)
+
 def vector_search(query_text: str, limit: int = 5, query_filter: models.Filter = None):
-    """Embeds the query text using Ollama and retrieves the top matches from Qdrant."""
+    """Embeds the query text using FastEmbed and retrieves the top matches from Qdrant."""
     
     # 1. Nomic requires the 'search_query:' prefix for lookups
     prefixed_query = f"search_query: {query_text}"
     
     try:
-        # 2. Generate the embedding vector via local Ollama server
-        response = ollama.embeddings(model=MODEL_NAME, prompt=prefixed_query)
-        query_vector = response["embedding"]
+        # 2. Generate the embedding vector via FastEmbed
+        query_vector = list(embedding_model.embed([prefixed_query]))[0]
+        if hasattr(query_vector, "tolist"):
+            query_vector = query_vector.tolist()
+        else:
+            query_vector = list(query_vector)
     except Exception as e:
-        print(f"Error generating embedding via Ollama: {e}")
-        print("Make sure your Ollama server is running and the model is pulled.")
+        print(f"Error generating embedding via FastEmbed: {e}")
         return
 
     # 3. Query Qdrant

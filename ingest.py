@@ -1,7 +1,7 @@
 import os
 import json
 from qdrant_client import QdrantClient, models
-import ollama
+from fastembed import TextEmbedding
 from tqdm import tqdm
 from qdrant_manager import ensure_qdrant_running
 import time # Ensure time is imported at the top of ingest.py
@@ -10,10 +10,13 @@ import time # Ensure time is imported at the top of ingest.py
 ensure_qdrant_running()
 
 JSONL_PATH = 'corpus/default-cards-20260915210531.jsonl'
-MODEL_NAME = "nomic-embed-text"
-BATCH_SIZE = 128  # 32 is the sweet spot for batch CPU embedding
+MODEL_NAME = "nomic-ai/nomic-embed-text-v1.5"
+BATCH_SIZE = 64  # Optimized CPU batch throughput with FastEmbed
 
 qclient = QdrantClient(host="localhost", port=6333)
+
+# Initialize FastEmbed TextEmbedding model
+embedding_model = TextEmbedding(model_name=MODEL_NAME)
 
 def stream_objects_with_pos(file_path: str, chunk_size: int = 65536):
     """Your memory-safe streaming generator."""
@@ -56,7 +59,7 @@ def extract_embedding_text(card: dict) -> str:
 embedding_cache: dict[str, list[float]] = {}
 
 def process_and_upsert_batch(batch_cards):
-    """Batches text strings together, checks in-memory cache, sends requests to Ollama only for novel texts, and upserts with Windows safety retries."""
+    """Batches text strings together, checks in-memory cache, generates embeddings using FastEmbed for novel texts, and upserts with Windows safety retries."""
     global embedding_cache
     card_texts = [(card, extract_embedding_text(card)) for card in batch_cards]
     
@@ -68,9 +71,8 @@ def process_and_upsert_batch(batch_cards):
             seen_novel.add(text)
             
     if novel_texts:
-        # Modern Ollama Batch Embedding Call for novel texts only
-        response = ollama.embed(model=MODEL_NAME, input=novel_texts)
-        new_embeddings = response["embeddings"]
+        # FastEmbed Batch Embedding Call for novel texts only
+        new_embeddings = [list(vec) for vec in embedding_model.embed(novel_texts)]
         for text, vec in zip(novel_texts, new_embeddings):
             embedding_cache[text] = vec
     
@@ -120,31 +122,44 @@ def ingest_cards_to_qdrant(file_path: str):
     except Exception:
         print("No prior collection records found. Starting fresh ingestion.")
 
-    with tqdm(total=file_size, unit="B", unit_scale=True, unit_divisor=1024, desc="Ingesting MTG Cards") as pbar:
-        last_pos = 0
+    print("Disabling Qdrant indexing threshold for fast bulk ingestion...")
+    qclient.update_collection(
+        collection_name="mtg_cards",
+        optimizer_config=models.OptimizersConfigDiff(indexing_threshold=0)
+    )
 
-        for card_obj, current_pos in stream_objects_with_pos(file_path):
-            pbar.update(current_pos - last_pos)
-            last_pos = current_pos
+    try:
+        with tqdm(total=file_size, unit="B", unit_scale=True, unit_divisor=1024, desc="Ingesting MTG Cards") as pbar:
+            last_pos = 0
 
-            # Skip digital-only printings
-            if card_obj.get("digital", False):
-                continue
+            for card_obj, current_pos in stream_objects_with_pos(file_path):
+                pbar.update(current_pos - last_pos)
+                last_pos = current_pos
 
-            # RESUME CHECK: If card already exists in database, skip embedding math completely!
-            if card_obj["id"] in existing_ids:
-                continue
+                # Skip digital-only printings
+                if card_obj.get("digital", False):
+                    continue
 
-            current_batch.append(card_obj)
+                # RESUME CHECK: If card already exists in database, skip embedding math completely!
+                if card_obj["id"] in existing_ids:
+                    continue
 
-            # Process when batch is filled
-            if len(current_batch) >= BATCH_SIZE:
+                current_batch.append(card_obj)
+
+                # Process when batch is filled
+                if len(current_batch) >= BATCH_SIZE:
+                    process_and_upsert_batch(current_batch)
+                    current_batch = []
+
+            # Catch remaining stray points
+            if current_batch:
                 process_and_upsert_batch(current_batch)
-                current_batch = []
-
-        # Catch remaining stray points
-        if current_batch:
-            process_and_upsert_batch(current_batch)
+    finally:
+        print("Restoring Qdrant indexing threshold (20000)...")
+        qclient.update_collection(
+            collection_name="mtg_cards",
+            optimizer_config=models.OptimizersConfigDiff(indexing_threshold=20000)
+        )
 
 if __name__ == "__main__":
     ingest_cards_to_qdrant(JSONL_PATH)
