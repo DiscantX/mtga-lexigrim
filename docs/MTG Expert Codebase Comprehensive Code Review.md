@@ -191,7 +191,7 @@ mtga-expert/
 │   ├── streaming.py             # Memory-safe JSONL streaming parser
 │   └── timer.py                 # IngestionTimer & telemetry instrumentation
 │
-├── storage/
+├── vectorstores/
 │   ├── __init__.py
 │   ├── base.py                  # Abstract BaseVectorStore interface
 │   ├── qdrant.py                # QdrantVectorStore implementation
@@ -233,7 +233,7 @@ mtga-expert/
 
 ### 9.1 Agnostic Interface Blueprint
 
-#### 1. Abstract Vector Store Interface (`storage/base.py`)
+#### 1. Abstract Vector Store Interface (`vectorstores/base.py`)
 ```python
 from abc import ABC, abstractmethod
 from typing import Any, Dict, List, Optional

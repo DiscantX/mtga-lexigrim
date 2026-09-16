@@ -6,7 +6,7 @@ This implementation plan covers **Phase 1** of the MTG Expert codebase refactor,
 
 ## 1. Objectives & Scope
 
-1. **Directory Structure Creation**: Establish the modular architecture layout (`config/`, `core/`, `storage/`, `embeddings/`, `ingestion/`, `search/`, `ai/`, `tests/`).
+1. **Directory Structure Creation**: Establish the modular architecture layout (`config/`, `core/`, `vectorstores/`, `embeddings/`, `ingestion/`, `search/`, `ai/`, `tests/`).
 2. **Centralized Configuration (`config/settings.py`)**: Implement a strongly-typed [`Settings`](config/settings.py:1) dataclass consolidating all constants, environment variables, cross-platform Qdrant binary discovery via [`shutil.which`](config/settings.py:1), and tuning parameters.
 3. **Core Memory-Safe Streaming (`core/streaming.py`)**: Consolidate stream reader logic into `JsonlStreamReader` supporting zero-RAM-footprint incremental chunk parsing and robust error recovery.
 4. **Core Timer & Telemetry (`core/timer.py`)**: Extract [`IngestionTimer`](core/timer.py:1) with thread-safe [`threading.Lock`](core/timer.py:1) measurements.
@@ -33,7 +33,7 @@ graph TD
 Create the following directories in the workspace root:
 - [`config/`](config/)
 - [`core/`](core/)
-- [`storage/`](storage/)
+- [`vectorstores/`](vectorstores/)
 - [`embeddings/`](embeddings/)
 - [`ingestion/`](ingestion/)
 - [`search/`](search/)

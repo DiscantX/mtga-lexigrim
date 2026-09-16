@@ -12,14 +12,14 @@ This implementation plan covers **Phase 2** of the MTG Expert codebase refactor,
    - [`embeddings/text_extractors.py`](embeddings/text_extractors.py): Centralize card payload filtering ([`extract_clean_payload()`](embeddings/text_extractors.py:5)) and text formatting ([`extract_embedding_text()`](embeddings/text_extractors.py:25)), correctly parsing single and double-faced ([`"card_faces"`](embeddings/text_extractors.py:30)) cards.
 
 2. **Abstract Vector Store & Qdrant Implementation (`storage/`)**:
-   - [`storage/base.py`](storage/base.py): Define [`BaseVectorStore`](storage/base.py:5) abstract class defining [`initialize_schema()`](storage/base.py:8), [`upsert_batch()`](storage/base.py:12), [`search()`](storage/base.py:16), [`get_existing_ids()`](storage/base.py:24), and [`set_bulk_mode()`](storage/base.py:28).
-   - [`storage/qdrant.py`](storage/qdrant.py): Implement [`QdrantVectorStore`](storage/qdrant.py:6) extending [`BaseVectorStore`](storage/base.py:5). Wraps [`qdrant_client.QdrantClient`](storage/qdrant.py:10). Provides parameterized page scroll (using 10,000 limit for ID-only fetching), schema creation, indexing thresholds, and robust retry logic with exponential backoff.
+   - [`vectorstores/base.py`](vectorstores/base.py): Define [`BaseVectorStore`](vectorstores/base.py:5) abstract class defining [`initialize_schema()`](vectorstores/base.py:8), [`upsert_batch()`](vectorstores/base.py:12), [`search()`](vectorstores/base.py:16), [`get_existing_ids()`](vectorstores/base.py:24), and [`set_bulk_mode()`](vectorstores/base.py:28).
+   - [`vectorstores/qdrant.py`](vectorstores/qdrant.py): Implement [`QdrantVectorStore`](vectorstores/qdrant.py:6) extending [`BaseVectorStore`](vectorstores/base.py:5). Wraps [`qdrant_client.QdrantClient`](vectorstores/qdrant.py:10). Provides parameterized page scroll (using 10,000 limit for ID-only fetching), schema creation, indexing thresholds, and robust retry logic with exponential backoff.
 
-3. **Cross-Platform Service Lifecycle Manager (`storage/service_manager.py`)**:
-   - [`storage/service_manager.py`](storage/service_manager.py): Refactor [`qdrant_manager.py`](qdrant_manager.py:1) into an object-oriented, OS-agnostic [`QdrantServiceManager`](storage/service_manager.py:6).
+3. **Cross-Platform Service Lifecycle Manager (`vectorstores/service_manager.py`)**:
+   - [`vectorstores/service_manager.py`](vectorstores/service_manager.py): Refactor [`qdrant_manager.py`](qdrant_manager.py:1) into an object-oriented, OS-agnostic [`QdrantServiceManager`](vectorstores/service_manager.py:6).
    - Replace hardcoded path `C:\Users\Admin\qdrant\qdrant.exe` with settings check ([`Settings.QDRANT_EXE_PATH`](config/settings.py:1)), [`QDRANT_BIN`](config/settings.py:1) env var, or [`shutil.which("qdrant")`](config/settings.py:1).
-   - Conditionally apply Windows-specific subprocess flags ([`startupinfo`](storage/service_manager.py:35), [`CREATE_NEW_PROCESS_GROUP`](storage/service_manager.py:38)) only when `sys.platform == "win32"`.
-   - Ensure [`ensure_qdrant_running()`](storage/service_manager.py:25) is an instance method, NOT executed at import time.
+   - Conditionally apply Windows-specific subprocess flags ([`startupinfo`](vectorstores/service_manager.py:35), [`CREATE_NEW_PROCESS_GROUP`](vectorstores/service_manager.py:38)) only when `sys.platform == "win32"`.
+   - Ensure [`ensure_qdrant_running()`](vectorstores/service_manager.py:25) is an instance method, NOT executed at import time.
 
 ---
 
@@ -27,9 +27,9 @@ This implementation plan covers **Phase 2** of the MTG Expert codebase refactor,
 
 ```mermaid
 graph TD
-    A[Settings / config/settings.py] --> B[storage/service_manager.py QdrantServiceManager]
+    A[Settings / config/settings.py] --> B[vectorstores/service_manager.py QdrantServiceManager]
     A --> C[embeddings/fastembed_provider.py FastEmbedProvider]
-    A --> D[storage/qdrant.py QdrantVectorStore]
+    A --> D[vectorstores/qdrant.py QdrantVectorStore]
     C --> E[embeddings/text_extractors.py extract_embedding_text]
     B --> F[Qdrant Server Daemon]
     D --> F
@@ -218,10 +218,10 @@ def extract_embedding_text(card_obj: Dict[str, Any]) -> str:
 
 ---
 
-### Step 4: Implement Abstract Vector Store Interface (`storage/base.py`)
-Create [`storage/base.py`](storage/base.py) defining the abstract vector store interface.
+### Step 4: Implement Abstract Vector Store Interface (`vectorstores/base.py`)
+Create [`vectorstores/base.py`](vectorstores/base.py) defining the abstract vector store interface.
 
-#### Exact Code Structure for [`storage/base.py`](storage/base.py)
+#### Exact Code Structure for [`vectorstores/base.py`](vectorstores/base.py)
 ```python
 from abc import ABC, abstractmethod
 from typing import Any, Dict, List, Optional
@@ -263,10 +263,10 @@ class BaseVectorStore(ABC):
 
 ---
 
-### Step 5: Implement Qdrant Vector Store Implementation (`storage/qdrant.py`)
-Create [`storage/qdrant.py`](storage/qdrant.py) implementing [`BaseVectorStore`](storage/base.py:5) wrapping [`qdrant_client.QdrantClient`](storage/qdrant.py:10). Incorporates optimized 10,000-limit scroll fetching, bulk mode threshold switching, and retry logic with exponential backoff.
+### Step 5: Implement Qdrant Vector Store Implementation (`vectorstores/qdrant.py`)
+Create [`vectorstores/qdrant.py`](vectorstores/qdrant.py) implementing [`BaseVectorStore`](vectorstores/base.py:5) wrapping [`qdrant_client.QdrantClient`](vectorstores/qdrant.py:10). Incorporates optimized 10,000-limit scroll fetching, bulk mode threshold switching, and retry logic with exponential backoff.
 
-#### Exact Code Structure for [`storage/qdrant.py`](storage/qdrant.py)
+#### Exact Code Structure for [`vectorstores/qdrant.py`](vectorstores/qdrant.py)
 ```python
 import time
 import logging
@@ -395,10 +395,10 @@ class QdrantVectorStore(BaseVectorStore):
 
 ---
 
-### Step 6: Implement Cross-Platform Service Manager (`storage/service_manager.py`)
-Refactor [`qdrant_manager.py`](qdrant_manager.py:1) into [`storage/service_manager.py`](storage/service_manager.py). Provides an object-oriented [`QdrantServiceManager`](storage/service_manager.py:6) with OS-agnostic binary resolution and conditional Windows process group flags.
+### Step 6: Implement Cross-Platform Service Manager (`vectorstores/service_manager.py`)
+Refactor [`qdrant_manager.py`](qdrant_manager.py:1) into [`vectorstores/service_manager.py`](vectorstores/service_manager.py). Provides an object-oriented [`QdrantServiceManager`](vectorstores/service_manager.py:6) with OS-agnostic binary resolution and conditional Windows process group flags.
 
-#### Exact Code Structure for [`storage/service_manager.py`](storage/service_manager.py)
+#### Exact Code Structure for [`vectorstores/service_manager.py`](vectorstores/service_manager.py)
 ```python
 import os
 import sys
@@ -478,8 +478,8 @@ class QdrantServiceManager:
 
 ## 4. Verification & Acceptance Criteria
 
-1. **Abstractions**: [`embeddings/base.py`](embeddings/base.py) and [`storage/base.py`](storage/base.py) define clean abstract contracts.
+1. **Abstractions**: [`embeddings/base.py`](embeddings/base.py) and [`vectorstores/base.py`](vectorstores/base.py) define clean abstract contracts.
 2. **FastEmbed Provider**: [`embeddings/fastembed_provider.py`](embeddings/fastembed_provider.py) initializes models lazily, uses thread-safe LRU caching (`collections.OrderedDict`), and respects thread settings.
 3. **Text Extractors**: [`embeddings/text_extractors.py`](embeddings/text_extractors.py) correctly flattens single and double-faced cards (`"card_faces"`) and cleans payloads.
-4. **Qdrant Vector Store**: [`storage/qdrant.py`](storage/qdrant.py) handles schema creation, bulk mode threshold switching, 10,000-limit ID scroll fetching, and robust retries.
-5. **Service Lifecycle Manager**: [`storage/service_manager.py`](storage/service_manager.py) locates Qdrant cross-platform, conditionally applies Windows flags (`sys.platform == "win32"`), and avoids import-time execution.
+4. **Qdrant Vector Store**: [`vectorstores/qdrant.py`](vectorstores/qdrant.py) handles schema creation, bulk mode threshold switching, 10,000-limit ID scroll fetching, and robust retries.
+5. **Service Lifecycle Manager**: [`vectorstores/service_manager.py`](vectorstores/service_manager.py) locates Qdrant cross-platform, conditionally applies Windows flags (`sys.platform == "win32"`), and avoids import-time execution.
