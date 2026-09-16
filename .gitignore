@@ -1,0 +1,15 @@
+# Qdrant Local Isolated Database
+.qdrant_storage/
+storage/
+snapshots/tmp/upload/
+.qdrant-initialized
+
+# Roo/Zoo Code
+.rooignore
+
+# Raw Daata
+corpus/
+data/
+
+# Python
+*.pyc
