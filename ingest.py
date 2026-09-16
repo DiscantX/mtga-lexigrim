@@ -16,9 +16,9 @@ ensure_qdrant_running()
 
 JSONL_PATH = 'corpus/default-cards-20260915210531.jsonl'
 MODEL_NAME = "nomic-ai/nomic-embed-text-v1.5"
-EMBEDDING_BATCH_SIZE = 4
+EMBEDDING_BATCH_SIZE = 2
 UPSERT_BATCH_SIZE = 128
-FE_THREADS = 4
+FE_THREADS = 2
 QUEUE_MAXSIZE = 1000
 REPORT_INTERVAL = 50
 
