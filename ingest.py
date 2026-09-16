@@ -11,7 +11,7 @@ ensure_qdrant_running()
 
 JSONL_PATH = 'corpus/default-cards-20260915210531.jsonl'
 MODEL_NAME = "nomic-ai/nomic-embed-text-v1.5"
-BATCH_SIZE = 64  # Optimized CPU batch throughput with FastEmbed
+BATCH_SIZE = 512  # Optimized batch size for bulk ingestion throughput
 
 qclient = QdrantClient(host="localhost", port=6333)
 
@@ -125,7 +125,7 @@ def ingest_cards_to_qdrant(file_path: str):
     print("Disabling Qdrant indexing threshold for fast bulk ingestion...")
     qclient.update_collection(
         collection_name="mtg_cards",
-        optimizer_config=models.OptimizersConfigDiff(indexing_threshold=0)
+        optimizer_config=models.OptimizersConfigDiff(indexing_threshold=1000000)
     )
 
     try:
