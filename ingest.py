@@ -240,21 +240,7 @@ def ingest_cards_to_qdrant(file_path: str):
         with open(file_path, "r", encoding="utf-8") as f:
             total_cards = sum(1 for _ in f)
 
-    print("Filtering dataset for pending cards...")
-    with timer.measure("Streaming & Filtering"):
-        pending_cards = []
-        skipped_existing = 0
-
-        for card_obj, _ in stream_objects_with_pos(file_path):
-            if card_obj["id"] in existing_ids:
-                skipped_existing += 1
-                continue
-            pending_cards.append(card_obj)
-
-    total_pending = len(pending_cards)
-    print(f"Dataset stats: {total_cards:,} total cards | {skipped_existing:,} already in DB | {total_pending:,} to process.")
-
-    # Initialize Queue and Background Consumer Worker Thread
+    # Initialize Queue and Background Consumer Worker Thread immediately after pre-scan line count
     card_queue = queue.Queue(maxsize=QUEUE_MAXSIZE)
     error_holder = []
     consumer_thread = threading.Thread(
@@ -267,8 +253,17 @@ def ingest_cards_to_qdrant(file_path: str):
     try:
         processed_this_run = 0
         current_embedding_batch = []
-        with tqdm(total=total_pending, unit="cards", desc="Ingesting MTG Cards", dynamic_ncols=True) as pbar:
-            for card_obj in pending_cards:
+        
+        # Calculate an estimated maximum remaining count for tqdm display bounds
+        estimated_pending = total_cards - len(existing_ids)
+        print(f"Dataset stats: {total_cards:,} total cards | {len(existing_ids):,} already in DB | ~{estimated_pending:,} to process.")
+
+        print("Streaming cards directly to FastEmbed...")
+        with tqdm(total=estimated_pending, unit="cards", desc="Ingesting MTG Cards", dynamic_ncols=True) as pbar:
+            for card_obj, _ in stream_objects_with_pos(file_path):
+                if card_obj["id"] in existing_ids:
+                    continue
+                
                 current_embedding_batch.append(card_obj)
 
                 if len(current_embedding_batch) >= EMBEDDING_BATCH_SIZE:
@@ -282,12 +277,13 @@ def ingest_cards_to_qdrant(file_path: str):
                 if error_holder:
                     raise error_holder[0]
 
-                pbar.set_postfix({
-                    "Total DB": len(existing_ids) + processed_this_run,
-                    "Cache Size": len(embedding_cache),
-                    "Embed/b": f"{timer.get_avg('FastEmbed Generation'):.2f}s",
-                    "Upsert/b": f"{timer.get_avg('Qdrant Upsert'):.2f}s"
-                })
+                if processed_this_run % REPORT_INTERVAL == 0:
+                    pbar.set_postfix({
+                        "Total DB": len(existing_ids) + processed_this_run,
+                        "Cache Size": len(embedding_cache),
+                        "Embed/b": f"{timer.get_avg('FastEmbed Generation'):.2f}s",
+                        "Upsert/b": f"{timer.get_avg('Qdrant Upsert'):.2f}s"
+                    })
 
             # Catch remaining stray cards
             if current_embedding_batch:
