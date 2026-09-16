@@ -8,16 +8,34 @@ from tqdm import tqdm
 JSONL_PATH = "corpus/default-cards-20260915210531.jsonl"
 
 
-def stream_objects_with_pos(file_path: str, chunk_size: int = 65536):
-    """Streams JSON objects sequentially without loading the whole file into RAM."""
+def stream_objects_with_pos(file_path: str, chunk_size: int = 65536, skipped_items: Optional[List[Dict[str, Any]]] = None):
+    """Streams JSON objects sequentially without loading the whole file into RAM, handling JSON decode errors gracefully."""
     decoder = json.JSONDecoder()
     buffer = ""
     bytes_read = 0
+    if skipped_items is None:
+        skipped_items = []
 
     with open(file_path, "r", encoding="utf-8") as f:
         while True:
             chunk = f.read(chunk_size)
             if not chunk:
+                while buffer:
+                    buffer = buffer.strip()
+                    if not buffer:
+                        break
+                    try:
+                        card_obj, index = decoder.raw_decode(buffer)
+                        yield card_obj, bytes_read
+                        buffer = buffer[index:]
+                    except json.JSONDecodeError as e:
+                        skipped_items.append({"buffer": buffer, "error": str(e)})
+                        print(f"[WARNING] Skipping unparseable JSON at EOF: {e}. Buffer segment: {buffer[:100]}...")
+                        newline_idx = buffer.find("\n")
+                        if newline_idx != -1:
+                            buffer = buffer[newline_idx + 1:]
+                        else:
+                            break
                 break
 
             bytes_read = f.tell()
@@ -25,12 +43,21 @@ def stream_objects_with_pos(file_path: str, chunk_size: int = 65536):
 
             while buffer:
                 buffer = buffer.strip()
+                if not buffer:
+                    break
                 try:
                     card_obj, index = decoder.raw_decode(buffer)
                     yield card_obj, bytes_read
                     buffer = buffer[index:]
-                except json.JSONDecodeError:
-                    break
+                except json.JSONDecodeError as e:
+                    newline_idx = buffer.find("\n")
+                    if newline_idx != -1:
+                        bad_line = buffer[:newline_idx]
+                        skipped_items.append({"line": bad_line, "error": str(e)})
+                        print(f"[WARNING] Skipping malformed JSON line due to decode error: {e}. Content: {bad_line[:100]}...")
+                        buffer = buffer[newline_idx + 1:]
+                    else:
+                        break
 
 
 def generate_dataclass_code(file_path: str, output_py_path: str = "card_model.py"):
