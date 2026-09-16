@@ -14,7 +14,7 @@ ensure_qdrant_running()
 
 JSONL_PATH = 'corpus/default-cards-20260915210531.jsonl'
 MODEL_NAME = "nomic-ai/nomic-embed-text-v1.5"
-BATCH_SIZE = 32  # Safe memory-friendly batch size for low-end laptops
+BATCH_SIZE = 16  # Safe memory-friendly batch size for low-end laptops
 FE_THREADS = 4
 
 qclient = QdrantClient(host="localhost", port=6333)
@@ -37,15 +37,19 @@ class IngestionTimer:
             self.timings[name] += elapsed
             self.counts[name] += 1
 
+    def get_avg(self, name: str) -> float:
+        count = self.counts[name]
+        return self.timings[name] / count if count > 0 else 0.0
+
     def report(self):
-        print("\n=== Ingestion Pipeline Performance Report ===")
+        tqdm.write("\n=== Ingestion Pipeline Performance Report ===")
         total_time = sum(self.timings.values())
         for name, duration in sorted(self.timings.items(), key=lambda x: x[1], reverse=True):
             count = self.counts[name]
             avg = duration / count if count > 0 else 0
             pct = (duration / total_time * 100) if total_time > 0 else 0
-            print(f"  - {name}: {duration:.3f}s total ({count} calls, avg {avg:.4f}s, {pct:.1f}%)")
-        print(f"Total time measured: {total_time:.3f}s\n")
+            tqdm.write(f"  - {name}: {duration:.3f}s total ({count} calls, avg {avg:.4f}s, {pct:.1f}%)")
+        tqdm.write(f"Total time measured: {total_time:.3f}s\n")
 
 def stream_objects_with_pos(file_path: str, chunk_size: int = 65536):
     """Your memory-safe streaming generator."""
@@ -205,7 +209,7 @@ def ingest_cards_to_qdrant(file_path: str):
 
     try:
         processed_this_run = 0
-        with tqdm(total=total_pending, unit="cards", desc="Ingesting MTG Cards") as pbar:
+        with tqdm(total=total_pending, unit="cards", desc="Ingesting MTG Cards", dynamic_ncols=True) as pbar:
             for card_obj in pending_cards:
                 current_batch.append(card_obj)
 
@@ -213,20 +217,32 @@ def ingest_cards_to_qdrant(file_path: str):
                 if len(current_batch) >= BATCH_SIZE:
                     process_and_upsert_batch(current_batch, timer)
                     processed_this_run += len(current_batch)
+                    
+                    # Print periodic intermediate report every 50 batches
+                    batches_run = processed_this_run // BATCH_SIZE
+                    if batches_run % 50 == 0:
+                        timer.report()
+
+                    pbar.update(len(current_batch))
                     current_batch = []
 
                 pbar.set_postfix({
                     "Total DB": len(existing_ids) + processed_this_run,
-                    "Cache Size": len(embedding_cache)
+                    "Cache Size": len(embedding_cache),
+                    "Embed/b": f"{timer.get_avg('FastEmbed Generation'):.2f}s",
+                    "Upsert/b": f"{timer.get_avg('Qdrant Upsert'):.2f}s"
                 })
-                pbar.update(1)
 
             # Catch remaining stray points
             if current_batch:
                 process_and_upsert_batch(current_batch, timer)
                 processed_this_run += len(current_batch)
                 pbar.update(len(current_batch))
-                pbar.set_postfix({"Total DB": len(existing_ids) + processed_this_run})
+                pbar.set_postfix({
+                    "Total DB": len(existing_ids) + processed_this_run,
+                    "Embed/b": f"{timer.get_avg('FastEmbed Generation'):.2f}s",
+                    "Upsert/b": f"{timer.get_avg('Qdrant Upsert'):.2f}s"
+                })
     finally:
         print("Restoring Qdrant indexing threshold (20000)...")
         qclient.update_collection(
