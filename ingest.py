@@ -1,3 +1,5 @@
+print("Initializing ingest.py...")
+
 import os
 import sys
 import json
