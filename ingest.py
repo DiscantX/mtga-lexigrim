@@ -53,19 +53,33 @@ def extract_embedding_text(card: dict) -> str:
 
 # Inside ingest.py -> update process_and_upsert_batch:
 
+embedding_cache: dict[str, list[float]] = {}
+
 def process_and_upsert_batch(batch_cards):
-    """Batches text strings together, sends ONE request to Ollama, and upserts with Windows safety retries."""
-    texts_to_embed = [extract_embedding_text(card) for card in batch_cards]
+    """Batches text strings together, checks in-memory cache, sends requests to Ollama only for novel texts, and upserts with Windows safety retries."""
+    global embedding_cache
+    card_texts = [(card, extract_embedding_text(card)) for card in batch_cards]
     
-    # Modern Ollama Batch Embedding Call
-    response = ollama.embed(model=MODEL_NAME, input=texts_to_embed)
-    vectors = response["embeddings"] 
+    novel_texts = []
+    seen_novel = set()
+    for _, text in card_texts:
+        if text not in embedding_cache and text not in seen_novel:
+            novel_texts.append(text)
+            seen_novel.add(text)
+            
+    if novel_texts:
+        # Modern Ollama Batch Embedding Call for novel texts only
+        response = ollama.embed(model=MODEL_NAME, input=novel_texts)
+        new_embeddings = response["embeddings"]
+        for text, vec in zip(novel_texts, new_embeddings):
+            embedding_cache[text] = vec
     
     points = []
-    for i, card in enumerate(batch_cards):
+    for card, text in card_texts:
+        vector = embedding_cache[text]
         points.append(models.PointStruct(
             id=card["id"],
-            vector=vectors[i],
+            vector=vector,
             payload=card
         ))
         
