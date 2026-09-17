@@ -13,6 +13,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="MTG Expert: Ingestion & Interactive Search CLI")
     parser.add_argument("-s", "--search", action="store_true", help="Launch interactive search REPL")
     parser.add_argument("-r", "--results", type=int, default=3, help="Default result limit for search")
+    parser.add_argument("-d", "--deduplicate", action="store_true", help="Enable oracle card deduplication (hide reprint duplicates)")
     parser.add_argument("--corpus", type=str, help="Path to card corpus JSONL for ingestion")
     
     args = parser.parse_args()
@@ -37,7 +38,7 @@ def main() -> None:
             vector_store = QdrantVectorStore(host=settings.qdrant_host, port=settings.qdrant_port, collection_name=settings.qdrant_collection_name)
             embedding_service = FastEmbedProvider(model_name=settings.embedding_model_name)
             engine = CardSearchEngine(vector_store, embedding_service)
-            cli = InteractiveSearchCLI(engine, default_limit=args.results)
+            cli = InteractiveSearchCLI(engine, default_limit=args.results, deduplicate_oracle=args.deduplicate)
             cli.run()
         else:
             parser.print_help()
