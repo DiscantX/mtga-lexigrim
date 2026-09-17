@@ -1,7 +1,7 @@
 # Qdrant Local Isolated Database
 .qdrant_storage/
 storage/
-snapshots/tmp/upload/
+snapshots/
 .qdrant-initialized
 
 # Roo/Zoo Code
@@ -13,3 +13,5 @@ data/
 
 # Python
 *.pyc
+.pytest_cache/
+.venv
