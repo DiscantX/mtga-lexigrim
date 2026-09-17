@@ -15,9 +15,10 @@ class CardSearchEngine:
         query_text: str,
         limit: Optional[int] = None,
         query_filter: Optional[Any] = None,
-        candidate_ids: Optional[list[str]] = None
+        candidate_ids: Optional[list[str]] = None,
+        deduplicate_oracle: bool = False
     ) -> list[Any]:
-        """Embeds the query text and retrieves matches from vector store with non-mutating filter logic."""
+        """Embeds the query text and retrieves matches from vector store with non-mutating filter logic and optional oracle deduplication."""
         prefixed_query = f"search_query: {query_text}"
 
         try:
@@ -41,14 +42,33 @@ class CardSearchEngine:
             else:
                 effective_filter = models.Filter(must=[has_id_condition])
 
-        query_limit = limit if limit is not None else 10000
+        # If deduplication is requested, fetch a larger candidate pool to ensure enough unique cards
+        display_limit = limit if limit is not None else 3
+        fetch_limit = min(10000, display_limit * 10) if deduplicate_oracle else display_limit
+
         results = self.vector_store.search(
             query_vector=query_vector,
-            limit=query_limit,
+            limit=fetch_limit,
             filters=effective_filter,
             candidate_ids=None  # Filtered explicitly via effective_filter to prevent mutation bugs
         )
-        return results
+
+        if not deduplicate_oracle:
+            return results[:display_limit]
+
+        # Post-processing deduplication by oracle_id (falling back to name)
+        seen_oracle_ids = set()
+        deduplicated_results = []
+        for point in results:
+            payload = getattr(point, "payload", {}) or {}
+            oracle_id = payload.get("oracle_id") or payload.get("name")
+            if oracle_id and oracle_id not in seen_oracle_ids:
+                seen_oracle_ids.add(oracle_id)
+                deduplicated_results.append(point)
+            if len(deduplicated_results) >= display_limit:
+                break
+
+        return deduplicated_results
 
     def multi_query_fusion(
         self,
