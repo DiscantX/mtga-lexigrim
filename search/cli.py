@@ -45,7 +45,7 @@ class InteractiveSearchCLI:
     def run(self) -> None:
         """Runs the interactive search REPL loop."""
         print("\n==================================================")
-        print("🔮 Interactive MTG Card Search & Narrowing Mode")
+        print("🔮 LexiGrim: Interactive Card Search & Narrowing Mode")
         print("Commands:")
         print("  - Type any query to start a fresh search.")
         print("  - Type '/narrow <query>' or '/n <query>' to search within current results.")

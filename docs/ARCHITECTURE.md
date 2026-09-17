@@ -1,8 +1,8 @@
-# MTG Expert System Architecture
+# LexiGrim System Architecture
 
 ## 1. Overview & Long-Term Vision
 
-The long-term goal of the **MTG Expert** project is to create an advanced AI expert on **Magic: The Gathering (MTG)**. The system leverages a local Qdrant vector database containing vector embeddings for all MTG cards (ingested from Scryfall data corpora), official game rules, and representative meta-game decklists. Once fully realized, the AI will be capable of building new decks, analyzing synergies, answering rules queries, and performing expert-level MTG tasks.
+The long-term goal of the **LexiGrim** (MTG Lexigrim) project is to create an advanced AI expert on **Magic: The Gathering (MTG)**. The system leverages a local Qdrant vector database containing vector embeddings for all MTG cards (ingested from Scryfall data corpora), official game rules, and representative meta-game decklists. Once fully realized, the AI will be capable of building new decks, analyzing synergies, answering rules queries, and performing expert-level MTG tasks.
 
 The project is structured into two main phases:
 - **Phase 1 -- Data Ingestion and Vector Database Search** ([`docs/plans/phase_1_foundation_and_core.md`](archive/plans/phase_1_foundation_and_core.md:1)): Building the foundational storage, streaming, embedding, ingestion pipeline, and similarity search engine.

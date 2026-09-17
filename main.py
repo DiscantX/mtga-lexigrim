@@ -10,7 +10,7 @@ from ingestion.pipeline import IngestionPipeline
 from core.timer import IngestionTimer
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="MTG Expert: Ingestion & Interactive Search CLI")
+    parser = argparse.ArgumentParser(description="LexiGrim: MTG Ingestion & Interactive Search CLI")
     parser.add_argument("-s", "--search", action="store_true", help="Launch interactive search REPL")
     parser.add_argument("-r", "--results", type=int, default=3, help="Default result limit for search")
     parser.add_argument("-d", "--deduplicate", action="store_true", help="Enable oracle card deduplication (hide reprint duplicates)")

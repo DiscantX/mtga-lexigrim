@@ -1,6 +1,6 @@
 # Developer & AI Agent Guidelines (`AGENTS.md`)
 
-Welcome to the **MTG Expert** codebase. This document provides core guidelines, environment instructions, and architectural constraints for AI agents and human developers working on this project.
+Welcome to the **LexiGrim** codebase. This document provides core guidelines, environment instructions, and architectural constraints for AI agents and human developers working on this project.
 
 ---
 
