@@ -46,3 +46,14 @@ This document records key architectural decisions, rationale, and trade-offs for
 - **Context**: Designing search narrowing and result ranking.
 - **Decision**: Adhered strictly to the core principle: *"Carry the full value until the final display operation (do rounding/truncation last)."*
 - **Consequence**: Cascading sub-searches constrain queries within valid candidate ID sets while preserving all qualifying candidate data until final display rendering.
+
+---
+
+## 6. Dual-Dataset Strategy (`oracle_cards` vs. `default_cards`) & Short-Term Deduplication
+
+- **Context**: Ingesting the Scryfall `default_cards` dataset introduced numerous duplicate printings for functionally identical cards (reprints), generating search noise and diluting relevance ranking.
+- **Decision**: 
+  1. Adopt **`oracle_cards`** as the default and primary corpus for AI development, rules interrogation, and deckbuilding ([`docs/ARCHITECTURE.md`](ARCHITECTURE.md:1)), ensuring a 1:1 mapping per unique card concept (`oracle_id`).
+  2. Maintain architectural extensibility to support **`default_cards`** optionally for collector-oriented workflows.
+  3. Implement short-term post-processing deduplication by `oracle_id` in [`CardSearchEngine.vector_search()`](../search/engine.py:13) ([`search/engine.py`](../search/engine.py:6)) when querying reprint-heavy corpora, ensuring clean search results prior to a full database rebuild.
+- **Consequence**: Keeps search relevance high, reduces search noise, and adheres to modular, agnostic design principles ([`docs/DECISIONS.md`](DECISIONS.md:1)) while supporting diverse ingestion sources.
