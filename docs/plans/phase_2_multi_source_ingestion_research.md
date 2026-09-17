@@ -4,7 +4,7 @@
 
 This document outlines the architectural research, design decisions, and planning strategies for **Phase 2** of the **MTG Expert** project. Building upon the stable foundation of **Phase 1** (Scryfall card ingestion, vector storage, and semantic search via [`IngestionPipeline`](ingestion/pipeline.py:21) and [`QdrantVectorStore`](vectorstores/qdrant.py:11)), Phase 2 expands ingestion capabilities to encompass official game rules ([`corpus/MagicCompRules-20260819.txt`](corpus/MagicCompRules-20260819.txt)), card rulings ([`corpus/rulings-20260915210031.jsonl`](corpus/rulings-20260915210031.jsonl)), archetype deck examples, and advanced strategy literature. 
 
-This document synthesizes our architectural analysis regarding collection structuring, hierarchical text chunking, incremental delta synchronization via content hashing, web scraping via `Crawl4AI`, LLM-assisted classification, authority weighting, and future agentic web retrieval middleware.
+This document synthesizes our architectural analysis regarding collection structuring, hierarchical text chunking, dual-layer card ruling integration, incremental delta synchronization via content hashing, web scraping via `Crawl4AI`, LLM-assisted classification, authority weighting, and future agentic web retrieval middleware.
 
 ---
 
@@ -31,7 +31,10 @@ To achieve expert-level proficiency, the system requires structured access to:
 ### 3.2 Card Rulings ([`corpus/rulings-20260915210031.jsonl`](corpus/rulings-20260915210031.jsonl))
 
 - **Structure**: JSONL stream linking card concepts (`oracle_id`) to specific ruling notes, sources, and publication dates.
-- **Challenge**: Must be easily cross-referenced with card entities during rules queries and game state evaluation.
+- **Dual-Layer Architecture Strategy**:
+  - **Vector Dilution Warning**: Baking ruling text into card dense embedding vectors dilutes core card semantics (name, type, mana cost, oracle text formatted in [`extract_embedding_text()`](embeddings/text_extractors.py:40) in [`embeddings/text_extractors.py`](embeddings/text_extractors.py:1)). Cards with 10-30 rulings (e.g. *Blood Moon*, *Animate Dead*) would drift away from functionally similar cards toward a "rules adjudication" vector space.
+  - **Payload Attachment**: Pre-join ruling lists into the `mtg_cards` Qdrant **payload** dictionary (`payload["rulings"]`), providing immediate context to the AI agent upon card retrieval without polluting the card's embedding vector.
+  - **Standalone Vector Space**: Ingest rulings independently into a dedicated `mtg_rulings` vector collection to support direct semantic queries over ruling precedents (e.g., "What happens when copying a modal spell?").
 
 ### 3.3 Strategy Literature & Guides (Reid Duke's *Level One*, Mike Flores' *Who's the Beatdown?*, Frank Karsten's Mana Math)
 
@@ -44,10 +47,9 @@ To achieve expert-level proficiency, the system requires structured access to:
 
 To store heterogeneous data sources in Qdrant ([`vectorstores/qdrant.py`](vectorstores/qdrant.py:11)), we adopt **dedicated collections**, implementing the abstract interface defined in [`BaseVectorStore`](vectorstores/base.py:4):
 
-
-- `mtg_cards`: Existing Scryfall card printings ([`docs/payload_schema.md`](docs/payload_schema.md:1)).
+- `mtg_cards`: Scryfall card printings with pure dense vectors and enriched payload rulings ([`docs/payload_schema.md`](docs/payload_schema.md:1)).
 - `mtg_rules`: Official parsed comprehensive rules.
-- `mtg_rulings`: Card-specific oracle rulings.
+- `mtg_rulings`: Card-specific oracle rulings indexed for direct semantic search over rules interactions.
 - `mtg_decks`: Archetype decklists.
 - `mtg_strategy`: Foundational strategy literature, theory, and curated guides.
 
@@ -55,7 +57,8 @@ To store heterogeneous data sources in Qdrant ([`vectorstores/qdrant.py`](vector
 
 1. **Clean Schema Isolation**: Different data types do not share attributes, preventing sparse, bloated payloads and schema pollution.
 2. **Optimized Semantic Spaces**: Queries target specific collections based on user intent, maximizing vector similarity precision.
-3. **Modular Alignment**: Aligns cleanly with our strongly-typed [`Settings`](config/settings.py:54) configuration ([`config/settings.py`](config/settings.py:1)) and Qdrant client architecture.
+3. **Pristine Vector Semantics**: Isolating card vectors from ruling text prevents semantic drift while maintaining full ruling context in payload metadata.
+4. **Modular Alignment**: Aligns cleanly with our strongly-typed [`Settings`](config/settings.py:54) configuration ([`config/settings.py`](config/settings.py:1)) and Qdrant client architecture.
 
 ---
 
@@ -88,11 +91,10 @@ To prevent manual tagging bottlenecks and noisy ingestion:
 
 ### 6.2 Strategy Articles Normalization & Chunking
 
-- **Intermediate Schema**: Standardized [`StrategyArticle`](docs/plans/phase_2_multi_source_ingestion_research.md:1) dict structure.
+- **Intermediate Schema**: Standardized `StrategyArticle` dict structure.
 - **Recursive Chunking**: Split long-form prose into 512–1024 token chunks with ~10% overlap.
 - **Provenance Header Prepending**:
   ```python
-
   def format_chunk_for_embedding(article: dict, chunk_text: str, chunk_idx: int) -> str:
       return (
           f"Source: {article['source']} | Title: {article['title']} | "
@@ -111,9 +113,12 @@ To handle incremental updates (errata, banned lists, rule revisions), we impleme
 
 ## 8. AI Layer Interaction & Future Agentic Web Retrieval
 
-### 8.1 Intent-Driven Retrieval Router
+### 8.1 Intent-Driven Retrieval Router & Parallel Search
 
-The Phase 2 AI agent middleware (built over [`CardSearchEngine`](search/engine.py:6) in [`search/engine.py`](search/engine.py:1)) routes queries to dedicated collections (`mtg_cards`, `mtg_rules`, `mtg_rulings`, `mtg_decks`, `mtg_strategy`) and applies metadata filters (e.g., `authority_tier == 1`).
+The Phase 2 AI agent middleware (built over [`CardSearchEngine`](search/engine.py:6) in [`search/engine.py`](search/engine.py:1)) routes queries to dedicated collections (`mtg_cards`, `mtg_rules`, `mtg_rulings`, `mtg_decks`, `mtg_strategy`):
+
+- **Targeted Single-Collection Search**: Card synergy and deck queries route directly to `mtg_cards` (with attached ruling payloads returned automatically).
+- **Parallel Multi-Collection Rules Search**: Complex rules and judge questions trigger **parallel asynchronous vector searches** across `mtg_rules` and `mtg_rulings`. The query engine aggregates relevant Comprehensive Rules passages and ruling precedents before passing context to the LLM.
 
 ### 8.2 On-the-Fly Web Retrieval & Tool Calling
 
