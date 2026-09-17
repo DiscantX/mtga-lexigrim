@@ -11,12 +11,12 @@ logger = logging.getLogger(__name__)
 class QdrantVectorStore(BaseVectorStore):
     """Qdrant-backed vector store implementing BaseVectorStore."""
 
-    def __init__(self, host: str = settings.qdrant_host, port: int = settings.qdrant_port, collection_name: str = settings.qdrant_collection_name, vector_size: int = 768):
+    def __init__(self, host: str = settings.qdrant_host, port: int = settings.qdrant_port, collection_name: str = settings.qdrant_collection_name, vector_size: int = 768, timeout: float = 60.0):
         self.host = host
         self.port = port
         self.collection_name = collection_name
         self.vector_size = vector_size
-        self.client = QdrantClient(host=self.host, port=self.port)
+        self.client = QdrantClient(host=self.host, port=self.port, timeout=timeout)
 
     def initialize_schema(self) -> None:
         collections = self.client.get_collections().collections
@@ -113,10 +113,26 @@ class QdrantVectorStore(BaseVectorStore):
             else:
                 query_filter = models.Filter(must=[id_condition])
 
-        response = self.client.query_points(
-            collection_name=self.collection_name,
-            query=query_vector,
-            query_filter=query_filter,
-            limit=limit
-        )
-        return response.points
+        attempts = settings.db_retry_attempts
+        backoff = settings.retry_backoff
+
+        for attempt in range(1, attempts + 1):
+            start_time = time.time()
+            logger.info(f"Executing Qdrant query_points on collection '{self.collection_name}' (attempt {attempt}/{attempts}) with limit={limit}...")
+            try:
+                response = self.client.query_points(
+                    collection_name=self.collection_name,
+                    query=query_vector,
+                    query_filter=query_filter,
+                    limit=limit
+                )
+                elapsed = time.time() - start_time
+                logger.info(f"Qdrant query_points completed successfully in {elapsed:.3f}s, returned {len(response.points)} points.")
+                return response.points
+            except Exception as e:
+                elapsed = time.time() - start_time
+                logger.warning(f"Qdrant query_points attempt {attempt} failed after {elapsed:.3f}s: {e}")
+                if attempt == attempts:
+                    raise RuntimeError(f"Failed to execute search after {attempts} attempts: {e}")
+                sleep_time = backoff * (2 ** (attempt - 1))
+                time.sleep(sleep_time)
