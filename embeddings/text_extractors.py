@@ -1,8 +1,8 @@
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
-def extract_clean_payload(card_obj: Dict[str, Any]) -> Dict[str, Any]:
+def extract_clean_payload(card_obj: Dict[str, Any], rulings: Optional[List[Dict[str, Any]]] = None) -> Dict[str, Any]:
     """Extract clean, essential metadata payload fields from raw Scryfall card dict in parity with docs/payload_schema.md."""
-    return {
+    payload = {
         # Core Identity & Rules
         "id": card_obj.get("id"),
         "oracle_id": card_obj.get("oracle_id"),
@@ -36,6 +36,8 @@ def extract_clean_payload(card_obj: Dict[str, Any]) -> Dict[str, Any]:
         # Legalities
         "legalities": card_obj.get("legalities", {}),
     }
+    payload["rulings"] = rulings or []
+    return payload
 
 def extract_embedding_text(card_obj: Dict[str, Any]) -> str:
     """Format rich descriptive text for embedding generation, handling single and double-faced cards."""

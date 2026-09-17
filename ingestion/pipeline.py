@@ -18,6 +18,31 @@ from vectorstores.service_manager import QdrantServiceManager
 logger = logging.getLogger(__name__)
 
 
+def load_rulings_index(rulings_file_path: str) -> Dict[str, List[Dict[str, Any]]]:
+    """Stream card rulings from a JSONL file and group them by oracle_id."""
+    rulings_index: Dict[str, List[Dict[str, Any]]] = {}
+    if not rulings_file_path:
+        return rulings_index
+    try:
+        reader = JsonlStreamReader(rulings_file_path)
+        for record, _ in reader.stream():
+            if not isinstance(record, dict):
+                continue
+            oracle_id = record.get("oracle_id")
+            if not oracle_id:
+                continue
+            ruling_entry = {
+                "source": record.get("source"),
+                "published_at": record.get("published_at"),
+                "comment": record.get("comment"),
+            }
+            rulings_index.setdefault(oracle_id, []).append(ruling_entry)
+        logger.info(f"Loaded rulings index for {len(rulings_index):,} oracle IDs from {rulings_file_path}")
+    except Exception as e:
+        logger.error(f"Failed to load rulings index from {rulings_file_path}: {e}")
+    return rulings_index
+
+
 class IngestionPipeline:
     """Object-oriented data ingestion pipeline orchestrating streaming, embedding generation, worker buffering, and Qdrant persistence."""
 
@@ -27,11 +52,14 @@ class IngestionPipeline:
         embedding_service: BaseEmbeddingService,
         timer: IngestionTimer,
         settings: Optional[Settings] = None,
+        rulings_file_path: Optional[str] = None,
     ) -> None:
         self.vector_store = vector_store
         self.embedding_service = embedding_service
         self.timer = timer
         self.settings = settings or default_settings
+        self.rulings_file_path = rulings_file_path
+        self.rulings_index: Dict[str, List[Dict[str, Any]]] = {}
 
     def run(self, file_path: str) -> None:
         """Execute the complete ingestion pipeline flow."""
@@ -50,6 +78,12 @@ class IngestionPipeline:
                 service_manager.ensure_running()
             except Exception as e:
                 logger.warning(f"Could not verify Qdrant service manager startup: {e}")
+
+            # 1.5. Load Rulings Index if specified
+            if self.rulings_file_path:
+                logger.info("Loading rulings index...")
+                with self.timer.measure("Load Rulings Index"):
+                    self.rulings_index = load_rulings_index(self.rulings_file_path)
 
             # 2. Resume Check
             logger.info("Fetching existing card IDs for resume capability...")
@@ -290,7 +324,9 @@ class IngestionPipeline:
             points = []
             for card, vector in zip(valid_cards, embeddings):
                 try:
-                    clean_payload = extract_clean_payload(card)
+                    oracle_id = card.get("oracle_id")
+                    card_rulings = self.rulings_index.get(oracle_id, []) if oracle_id else []
+                    clean_payload = extract_clean_payload(card, rulings=card_rulings)
                     points.append(
                         models.PointStruct(
                             id=str(card["id"]),
