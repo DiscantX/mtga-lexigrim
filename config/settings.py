@@ -20,8 +20,23 @@ class Settings:
     qdrant_port: int = field(
         default_factory=lambda: int(os.getenv("QDRANT_PORT", "6333"))
     )
+    qdrant_collection_cards: str = field(
+        default_factory=lambda: os.getenv("QDRANT_COLLECTION_CARDS", "mtg_cards")
+    )
+    qdrant_collection_rules: str = field(
+        default_factory=lambda: os.getenv("QDRANT_COLLECTION_RULES", "mtg_rules")
+    )
+    qdrant_collection_rulings: str = field(
+        default_factory=lambda: os.getenv("QDRANT_COLLECTION_RULINGS", "mtg_rulings")
+    )
+    qdrant_collection_decks: str = field(
+        default_factory=lambda: os.getenv("QDRANT_COLLECTION_DECKS", "mtg_decks")
+    )
+    qdrant_collection_strategy: str = field(
+        default_factory=lambda: os.getenv("QDRANT_COLLECTION_STRATEGY", "mtg_strategy")
+    )
     qdrant_collection_name: str = field(
-        default_factory=lambda: os.getenv("QDRANT_COLLECTION_NAME", "mtg_cards")
+        default_factory=lambda: os.getenv("QDRANT_COLLECTION_NAME") or os.getenv("QDRANT_COLLECTION_CARDS", "mtg_cards")
     )
     
     # FastEmbed Settings

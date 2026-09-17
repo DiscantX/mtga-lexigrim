@@ -11,20 +11,21 @@ logger = logging.getLogger(__name__)
 class QdrantVectorStore(BaseVectorStore):
     """Qdrant-backed vector store implementing BaseVectorStore."""
 
-    def __init__(self, host: str = settings.qdrant_host, port: int = settings.qdrant_port, collection_name: str = settings.qdrant_collection_name, vector_size: int = 768, timeout: float = 60.0):
+    def __init__(self, host: str = settings.qdrant_host, port: int = settings.qdrant_port, collection_name: str = settings.qdrant_collection_cards, vector_size: int = 768, timeout: float = 60.0):
         self.host = host
         self.port = port
         self.collection_name = collection_name
         self.vector_size = vector_size
         self.client = QdrantClient(host=self.host, port=self.port, timeout=timeout)
 
-    def initialize_schema(self) -> None:
+    def initialize_schema(self, collection_name: Optional[str] = None) -> None:
+        target_col = collection_name or self.collection_name
         collections = self.client.get_collections().collections
-        exists = any(c.name == self.collection_name for c in collections)
+        exists = any(c.name == target_col for c in collections)
 
         if not exists:
             self.client.create_collection(
-                collection_name=self.collection_name,
+                collection_name=target_col,
                 vectors_config=models.VectorParams(
                     size=self.vector_size,
                     distance=models.Distance.COSINE
@@ -33,24 +34,26 @@ class QdrantVectorStore(BaseVectorStore):
                     indexing_threshold=settings.qdrant_indexing_threshold
                 )
             )
-            logger.info(f"Created Qdrant collection '{self.collection_name}' with vector size {self.vector_size}.")
+            logger.info(f"Created Qdrant collection '{target_col}' with vector size {self.vector_size}.")
         else:
-            logger.info(f"Qdrant collection '{self.collection_name}' already exists.")
+            logger.info(f"Qdrant collection '{target_col}' already exists.")
 
-    def set_bulk_mode(self, enabled: bool) -> None:
+    def set_bulk_mode(self, enabled: bool, collection_name: Optional[str] = None) -> None:
+        target_col = collection_name or self.collection_name
         threshold = settings.qdrant_bulk_indexing_threshold if enabled else settings.qdrant_indexing_threshold
         try:
             self.client.update_collection(
-                collection_name=self.collection_name,
+                collection_name=target_col,
                 optimizers_config=models.OptimizersConfigDiff(
                     indexing_threshold=threshold
                 )
             )
-            logger.info(f"Qdrant bulk mode {'enabled' if enabled else 'disabled'} (indexing_threshold={threshold}).")
+            logger.info(f"Qdrant collection '{target_col}' bulk mode {'enabled' if enabled else 'disabled'} (indexing_threshold={threshold}).")
         except Exception as e:
-            logger.warning(f"Failed to update Qdrant indexing threshold: {e}")
+            logger.warning(f"Failed to update Qdrant indexing threshold for collection '{target_col}': {e}")
 
-    def upsert_batch(self, ids: List[str], vectors: List[List[float]], payloads: List[Dict[str, Any]]) -> None:
+    def upsert_batch(self, ids: List[str], vectors: List[List[float]], payloads: List[Dict[str, Any]], collection_name: Optional[str] = None) -> None:
+        target_col = collection_name or self.collection_name
         points = [
             models.PointStruct(id=card_id, vector=vector, payload=payload)
             for card_id, vector, payload in zip(ids, vectors, payloads)
@@ -62,24 +65,25 @@ class QdrantVectorStore(BaseVectorStore):
         for attempt in range(1, attempts + 1):
             try:
                 self.client.upsert(
-                    collection_name=self.collection_name,
+                    collection_name=target_col,
                     points=points
                 )
                 return
             except Exception as e:
                 if attempt == attempts:
-                    raise RuntimeError(f"Failed to upsert batch after {attempts} attempts: {e}")
+                    raise RuntimeError(f"Failed to upsert batch to collection '{target_col}' after {attempts} attempts: {e}")
                 sleep_time = backoff * (2 ** (attempt - 1))
                 time.sleep(sleep_time)
 
-    def get_existing_ids(self) -> Set[str]:
+    def get_existing_ids(self, collection_name: Optional[str] = None) -> Set[str]:
+        target_col = collection_name or self.collection_name
         existing_ids = set()
         offset = None
 
         try:
             while True:
                 records, offset = self.client.scroll(
-                    collection_name=self.collection_name,
+                    collection_name=target_col,
                     with_payload=False,
                     with_vectors=False,
                     limit=10000,
@@ -90,7 +94,7 @@ class QdrantVectorStore(BaseVectorStore):
                 if offset is None:
                     break
         except Exception as e:
-            logger.warning(f"Collection '{self.collection_name}' does not exist or error fetching existing IDs: {e}")
+            logger.warning(f"Collection '{target_col}' does not exist or error fetching existing IDs: {e}")
 
         return existing_ids
 
@@ -99,8 +103,10 @@ class QdrantVectorStore(BaseVectorStore):
         query_vector: List[float],
         limit: int = 10,
         filters: Optional[Any] = None,
-        candidate_ids: Optional[List[str]] = None
+        candidate_ids: Optional[List[str]] = None,
+        collection_name: Optional[str] = None
     ) -> List[Any]:
+        target_col = collection_name or self.collection_name
         query_filter = filters
 
         if candidate_ids is not None:
@@ -118,21 +124,21 @@ class QdrantVectorStore(BaseVectorStore):
 
         for attempt in range(1, attempts + 1):
             start_time = time.time()
-            logger.info(f"Executing Qdrant query_points on collection '{self.collection_name}' (attempt {attempt}/{attempts}) with limit={limit}...")
+            logger.info(f"Executing Qdrant query_points on collection '{target_col}' (attempt {attempt}/{attempts}) with limit={limit}...")
             try:
                 response = self.client.query_points(
-                    collection_name=self.collection_name,
+                    collection_name=target_col,
                     query=query_vector,
                     query_filter=query_filter,
                     limit=limit
                 )
                 elapsed = time.time() - start_time
-                logger.info(f"Qdrant query_points completed successfully in {elapsed:.3f}s, returned {len(response.points)} points.")
+                logger.info(f"Qdrant query_points on collection '{target_col}' completed successfully in {elapsed:.3f}s, returned {len(response.points)} points.")
                 return response.points
             except Exception as e:
                 elapsed = time.time() - start_time
-                logger.warning(f"Qdrant query_points attempt {attempt} failed after {elapsed:.3f}s: {e}")
+                logger.warning(f"Qdrant query_points on collection '{target_col}' attempt {attempt} failed after {elapsed:.3f}s: {e}")
                 if attempt == attempts:
-                    raise RuntimeError(f"Failed to execute search after {attempts} attempts: {e}")
+                    raise RuntimeError(f"Failed to execute search on collection '{target_col}' after {attempts} attempts: {e}")
                 sleep_time = backoff * (2 ** (attempt - 1))
                 time.sleep(sleep_time)
