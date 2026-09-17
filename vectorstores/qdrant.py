@@ -113,10 +113,10 @@ class QdrantVectorStore(BaseVectorStore):
             else:
                 query_filter = models.Filter(must=[id_condition])
 
-        hits = self.client.search(
+        response = self.client.query_points(
             collection_name=self.collection_name,
-            query_vector=query_vector,
+            query=query_vector,
             query_filter=query_filter,
             limit=limit
         )
-        return hits
+        return response.points
