@@ -1,7 +1,8 @@
 import json
-from typing import Any, Dict, Generator, Tuple, Optional, List
+from typing import Any, Dict, Generator, Tuple, Optional, List, Iterator
+from ingestion.readers.base import BaseSourceReader
 
-class JsonlStreamReader:
+class JsonlStreamReader(BaseSourceReader):
     """Memory-safe streaming reader for large JSONL datasets using incremental chunk decoding."""
     
     def __init__(self, file_path: str, chunk_size: int = 65536):
@@ -13,6 +14,11 @@ class JsonlStreamReader:
         """Count total lines in a JSONL file efficiently."""
         with open(file_path, "r", encoding="utf-8") as f:
             return sum(1 for _ in f)
+
+    def stream_records(self) -> Iterator[Dict[str, Any]]:
+        """Yield raw record dictionaries from the JSONL file."""
+        for record, _ in self.stream():
+            yield record
 
     def stream(self, skipped_items: Optional[List[Dict[str, Any]]] = None) -> Generator[Tuple[Dict[str, Any], int], None, None]:
         if skipped_items is None:
