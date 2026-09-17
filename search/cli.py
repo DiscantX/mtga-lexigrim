@@ -51,7 +51,7 @@ class InteractiveSearchCLI:
         print("  - Type '/narrow <query>' or '/n <query>' to search within current results.")
         print("  - Type '/dedupe' to toggle oracle duplicate filtering ON/OFF.")
         print("  - Type ':quit', ':q', or 'exit' to exit.")
-        print(f"  [Current Deduplication State: {'ON' if self.deduplicate_oracle else 'OFF'}]")
+        print(f"  [Current Deduplication State: {'ON' if self.deduplicate_oracle else 'OFF'} | Results Limit: {self.default_limit}]")
         print("==================================================\n")
 
         while True:
@@ -92,14 +92,14 @@ class InteractiveSearchCLI:
                 print(f"Narrowing within {len(self.last_candidate_ids)} previous candidate cards (Dedupe: {'ON' if self.deduplicate_oracle else 'OFF'})...")
                 results = self.search_engine.vector_search(
                     query_to_run,
-                    limit=None,
+                    limit=self.default_limit,
                     candidate_ids=self.last_candidate_ids,
                     deduplicate_oracle=self.deduplicate_oracle
                 )
             else:
                 results = self.search_engine.vector_search(
                     query_to_run,
-                    limit=None,
+                    limit=self.default_limit,
                     deduplicate_oracle=self.deduplicate_oracle
                 )
                 # Carry full candidate set IDs for subsequent narrowing

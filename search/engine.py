@@ -42,9 +42,9 @@ class CardSearchEngine:
             else:
                 effective_filter = models.Filter(must=[has_id_condition])
 
-        # If deduplication is requested, fetch a larger candidate pool to ensure enough unique cards
-        display_limit = limit if limit is not None else 3
-        fetch_limit = min(10000, display_limit * 10) if deduplicate_oracle else display_limit
+        # If deduplication is requested, fetch an expanded candidate pool to ensure enough unique cards
+        display_limit = limit if limit is not None else 10000
+        fetch_limit = min(10000, display_limit * 5) if deduplicate_oracle else display_limit
 
         results = self.vector_store.search(
             query_vector=query_vector,
