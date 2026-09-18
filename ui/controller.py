@@ -110,3 +110,24 @@ class LexiGrimSession:
 
         self._active_ingestion_thread = threading.Thread(target=run_ingestion_thread, daemon=True)
         self._active_ingestion_thread.start()
+
+    def stream_ai_chat_response(self, user_prompt: str):
+        """Streaming AI chat response generator prepared for Phase 2 Google Gemini integration."""
+        self.chat_history.append({"role": "user", "content": user_prompt})
+        
+        # Simulated intelligent MTG response chunks (ready to be replaced by Gemini client in Phase 2)
+        response_simulation = (
+            f"🔮 [LexiGrim AI Assistant]: Analyzing query '{user_prompt}' against MTG rules and card database...\n"
+            f"Based on current search context and stored embeddings, here is the strategic analysis:\n"
+            f"- Relevant cards identified in recent search candidates.\n"
+            f"- Consider synergy, mana curve efficiency, and interaction timing.\n"
+            f"AI integration middleware ready for Phase 2 LLM provider connection."
+        )
+        
+        # Yield in chunks to simulate token streaming
+        chunk_size = 30
+        for i in range(0, len(response_simulation), chunk_size):
+            chunk = response_simulation[i:i + chunk_size]
+            yield chunk
+            
+        self.chat_history.append({"role": "assistant", "content": response_simulation})
