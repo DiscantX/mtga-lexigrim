@@ -3,7 +3,7 @@ import threading
 from typing import Any, Optional, List, Dict
 from search.engine import CardSearchEngine
 from config.settings import Settings
-from ingestion.pipeline import IngestionPipeline
+from ingestion.orchestrator import IngestionOrchestrator
 from core.timer import IngestionTimer
 
 class LexiGrimSession:
@@ -57,15 +57,16 @@ class LexiGrimSession:
             
         return formatted_results
 
-    def trigger_background_ingestion(self, corpus_path: str, rulings_file_path: Optional[str] = None) -> None:
-        """Launch ingestion on a separate thread, piping progress updates to ui-safe queue."""
+    def trigger_background_ingestion(self, corpus_path: Optional[str] = None, force: bool = False) -> None:
+        """Launch ingestion on a separate thread using IngestionOrchestrator, piping progress updates to ui-safe queue."""
         if self._active_ingestion_thread and self._active_ingestion_thread.is_alive():
             raise RuntimeError("Ingestion is already running!")
             
         self.is_ingesting = True
         self.ingestion_progress = 0.0
-        self.ingestion_speed = "0.0 cards/s"
-        self.ingestion_message = f"Starting ingestion for {corpus_path}"
+        self.ingestion_speed = "0.0 items/s"
+        target_desc = corpus_path if corpus_path else "all corpora (auto-discovery)"
+        self.ingestion_message = f"Starting ingestion for {target_desc}"
 
         def run_ingestion_thread():
             try:
@@ -80,15 +81,19 @@ class LexiGrimSession:
                         "message": msg
                     })
 
-                pipeline = IngestionPipeline(
+                orchestrator = IngestionOrchestrator(
                     vector_store=self.search_engine.vector_store,
                     embedding_service=self.search_engine.embedding_service,
                     timer=IngestionTimer(),
                     settings=self.settings,
-                    rulings_file_path=rulings_file_path,
                     progress_callback=progress_callback
                 )
-                pipeline.run(corpus_path)
+
+                if corpus_path:
+                    orchestrator.detect_and_run(corpus_path, force=force)
+                else:
+                    orchestrator.run_all(force=force)
+
                 self.is_ingesting = False
                 self.ingestion_progress = 100.0
                 self.ingestion_message = "Ingestion completed successfully."

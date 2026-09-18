@@ -142,11 +142,12 @@ class InteractiveCLIShell:
             self.append_output(f"\n🔮 Oracle deduplication toggled to: {status}\n")
             return
 
-        if user_text.startswith("/ingest "):
-            path = user_text.split(" ", 1)[1].strip()
+        if lower_text == "/ingest" or user_text.startswith("/ingest "):
+            path = user_text.split(" ", 1)[1].strip() if len(user_text.split(" ", 1)) > 1 else None
             try:
                 self.session.trigger_background_ingestion(path)
-                self.append_output(f"\n🚀 Started background ingestion for corpus: {path}\n")
+                target_desc = path if path else "all corpora (auto-discovery)"
+                self.append_output(f"\n🚀 Started background ingestion for: {target_desc}\n")
             except Exception as e:
                 self.append_output(f"\n⚠️ Failed to start background ingestion: {e}\n")
             return
