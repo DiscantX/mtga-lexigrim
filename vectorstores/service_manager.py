@@ -35,7 +35,11 @@ class QdrantServiceManager:
             )
 
         logger.info(f"Starting Qdrant daemon from '{self.qdrant_bin}'...")
-        kwargs = {}
+        os.makedirs("data", exist_ok=True)
+        env = os.environ.copy()
+        env["QDRANT__STORAGE__STORAGE_PATH"] = os.path.abspath("data/storage")
+
+        kwargs = {"env": env}
         if sys.platform == "win32":
             startupinfo = subprocess.STARTUPINFO()
             startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
