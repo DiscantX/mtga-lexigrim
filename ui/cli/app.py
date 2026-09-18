@@ -1,3 +1,4 @@
+import queue
 from typing import List, Tuple, Any
 from prompt_toolkit.application import Application
 from prompt_toolkit.layout import Layout, HSplit, Window
@@ -66,13 +67,31 @@ class InteractiveCLIShell:
         )
 
     def render_header(self) -> FormattedText:
+        while not self.session.ingestion_progress_queue.empty():
+            try:
+                self.session.ingestion_progress_queue.get_nowait()
+            except queue.Empty:
+                break
+
         dedupe_status = "ON" if self.session.deduplicate_oracle else "OFF"
         limit = self.session.default_limit
         candidates_count = len(self.session.last_candidates)
-        return [
-            ("class:header", f" 🔮 LexiGrim Dashboard | Dedupe: {dedupe_status} | Limit: {limit} | Active Candidates: {candidates_count} \n"),
-            ("class:header_sub", " Tip: Use /narrow <query> to refine current results, or type a query directly.")
-        ]
+        
+        if self.session.is_ingesting or self.session.ingestion_progress > 0:
+            pct = self.session.ingestion_progress
+            filled = int(pct / 10)
+            bar = "[" + "=" * filled + "." * (10 - filled) + "]"
+            speed = self.session.ingestion_speed
+            msg = self.session.ingestion_message
+            return [
+                ("class:header", f" 🔮 LexiGrim Dashboard | Ingestion: {pct:5.1f}% {bar} | Rate: {speed} \n"),
+                ("class:header_sub", f" Status: {msg}")
+            ]
+        else:
+            return [
+                ("class:header", f" 🔮 LexiGrim Dashboard | Dedupe: {dedupe_status} | Limit: {limit} | Active Candidates: {candidates_count} \n"),
+                ("class:header_sub", " Tip: Use /narrow <query> to refine, /ingest <path> for background ingestion, or search directly.")
+            ]
 
     def handle_user_input(self, buffer) -> None:
         user_text = buffer.text.strip()
@@ -90,6 +109,15 @@ class InteractiveCLIShell:
             self.session.deduplicate_oracle = not self.session.deduplicate_oracle
             status = "ON" if self.session.deduplicate_oracle else "OFF"
             self.append_output(f"\n🔮 Oracle deduplication toggled to: {status}\n")
+            return
+
+        if user_text.startswith("/ingest "):
+            path = user_text.split(" ", 1)[1].strip()
+            try:
+                self.session.trigger_background_ingestion(path)
+                self.append_output(f"\n🚀 Started background ingestion for corpus: {path}\n")
+            except Exception as e:
+                self.append_output(f"\n⚠️ Failed to start background ingestion: {e}\n")
             return
             
         is_narrow = False

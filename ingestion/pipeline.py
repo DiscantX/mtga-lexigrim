@@ -53,12 +53,14 @@ class IngestionPipeline:
         timer: IngestionTimer,
         settings: Optional[Settings] = None,
         rulings_file_path: Optional[str] = None,
+        progress_callback: Optional[Any] = None,
     ) -> None:
         self.vector_store = vector_store
         self.embedding_service = embedding_service
         self.timer = timer
         self.settings = settings or default_settings
         self.rulings_file_path = rulings_file_path
+        self.progress_callback = progress_callback
         self.rulings_index: Dict[str, List[Dict[str, Any]]] = {}
 
     def run(self, file_path: str) -> None:
@@ -141,6 +143,13 @@ class IngestionPipeline:
                             )
                             processed_this_run += len(current_batch_cards)
                             pbar.update(len(current_batch_cards))
+                            if self.progress_callback:
+                                try:
+                                    pct = (processed_this_run / max(1, estimated_pending)) * 100.0
+                                    speed_str = f"{pbar.format_dict.get('rate', 0) or 0:.1f} cards/s"
+                                    self.progress_callback(pct, speed_str, f"Ingested {processed_this_run}/{estimated_pending} cards")
+                                except Exception:
+                                    pass
                             current_batch_cards = []
 
                     except Exception as e:
@@ -235,6 +244,12 @@ class IngestionPipeline:
                 logger.info("Re-ingestion of missed cards completed.")
             else:
                 logger.info("Zero missed cards detected. Ingestion verified 100% complete!")
+
+            if self.progress_callback:
+                try:
+                    self.progress_callback(100.0, "Complete", "Ingestion completed successfully.")
+                except Exception:
+                    pass
 
         except KeyboardInterrupt:
             logger.warning("Safe exit requested (Ctrl+C). Cleaning up...")
