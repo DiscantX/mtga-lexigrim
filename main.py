@@ -10,6 +10,8 @@ from ui.controller import LexiGrimSession
 from ui.cli.app import InteractiveCLIShell
 from ingestion.pipeline import IngestionPipeline
 from ingestion.runner import IngestionRunner
+from ingestion.orchestrator import IngestionOrchestrator
+from ingestion.sources.sync import CorpusSyncManager
 from core.timer import IngestionTimer
 
 def main() -> None:
@@ -20,6 +22,7 @@ def main() -> None:
     parser.add_argument("-d", "--deduplicate", action="store_true", help="Enable oracle card deduplication (hide reprint duplicates)")
     parser.add_argument("--corpus", type=str, help="Path to card corpus JSONL for ingestion")
     parser.add_argument("--rules", action="store_true", help="Ingest MTG Comprehensive Rules into mtg_rules collection")
+    parser.add_argument("--sync", type=str, nargs="?", const="all", help="Sync Scryfall bulk corpora (optional type: oracle_cards, rulings, oracle_tags) and ingest")
     parser.add_argument("--force", action="store_true", help="Force re-creation or overwrite during ingestion")
     
     args = parser.parse_args()
@@ -41,6 +44,23 @@ def main() -> None:
             print("Starting MTG Comprehensive Rules ingestion...")
             runner = IngestionRunner(settings=settings)
             runner.run_rules(force=args.force)
+        elif args.sync is not None:
+            print(f"Starting corpus synchronization for '{args.sync}'...")
+            service_manager = QdrantServiceManager(host=settings.qdrant_host, port=settings.qdrant_port)
+            service_manager.ensure_running()
+            vector_store = QdrantVectorStore(host=settings.qdrant_host, port=settings.qdrant_port, collection_name=settings.qdrant_collection_name)
+            vector_store.initialize_schema()
+            embedding_service = FastEmbedProvider(model_name=settings.embedding_model_name)
+            timer = IngestionTimer()
+            sync_manager = CorpusSyncManager()
+            orchestrator = IngestionOrchestrator(vector_store, embedding_service, timer, settings)
+            if args.sync == "all":
+                sync_manager.sync_all(force=args.force)
+                orchestrator.run_all(force=args.force)
+            else:
+                synced_path = sync_manager.sync_corpus(bulk_type=args.sync, force=args.force)
+                orchestrator.detect_and_run(synced_path, force=args.force)
+            print("Corpus synchronization and ingestion completed successfully.")
         elif args.search:
             print("Launching interactive search REPL...")
             service_manager = QdrantServiceManager(host=settings.qdrant_host, port=settings.qdrant_port)

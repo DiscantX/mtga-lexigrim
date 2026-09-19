@@ -4,6 +4,22 @@ All notable changes to this project will be documented in this file.
 
 ---
 
+## [1.1.0] - 2026-09-19 (Scryfall API Client & Unified Data Download Subsystem)
+
+### Added
+- **Unified Data Acquisition & Download Subsystem** ([`ingestion/sources/`](../ingestion/sources/)):
+  - Abstract base contracts [`BulkMetadata`](../ingestion/sources/base.py:1), [`BaseDownloader`](../ingestion/sources/base.py:1), and [`BaseDataProvider`](../ingestion/sources/base.py:1) in [`ingestion/sources/base.py`](../ingestion/sources/base.py:1).
+  - Agnostic streaming downloader [`HttpDownloader`](../ingestion/sources/downloader.py:1) ([`ingestion/sources/downloader.py`](../ingestion/sources/downloader.py:1)) supporting chunked downloads and on-the-fly streaming gzip decompression via `zlib.decompressobj()`.
+  - Concrete Scryfall API client [`ScryfallClient`](../ingestion/sources/scryfall.py:1) ([`ingestion/sources/scryfall.py`](../ingestion/sources/scryfall.py:1)) with required compliance headers (`User-Agent`, `Accept`), rate limiting (100ms throttle), and HTTP 429 exponential backoff retry logic.
+  - Corpus synchronization manager [`CorpusSyncManager`](../ingestion/sources/sync.py:1) ([`ingestion/sources/sync.py`](../ingestion/sources/sync.py:1)) supporting missing corpus detection, timestamp freshness verification against remote `updated_at`, manifest persistence (`corpus/.manifest.json`), and stale file cleanup.
+- **Oracle Tags Pipeline Stub**: Added [`OracleTagsIngestionPipeline`](../ingestion/pipelines/oracle_tags_pipeline.py:1) ([`ingestion/pipelines/oracle_tags_pipeline.py`](../ingestion/pipelines/oracle_tags_pipeline.py:1)) as a documented no-op stub for future semantic tag integration.
+- **UI & CLI Integration**:
+  - Added background sync support (`LexiGrimSession.trigger_background_sync()`) and live progress telemetry in [`LexiGrimSession`](../ui/controller.py:1) and [`InteractiveCLIShell`](../ui/cli/app.py:1).
+  - Added interactive `/sync [type]` command in [`InteractiveCLIShell`](../ui/cli/app.py:1).
+  - Added `--sync [type]` CLI flag in [`main.py`](../main.py:1) for automated corpus acquisition and ingestion prior to execution.
+
+---
+
 ## [1.0.0] - 2026-09-17 (Major Architectural Refactor & Phase 1-4 Completion)
 
 ### Added

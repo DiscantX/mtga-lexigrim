@@ -93,6 +93,7 @@ class InteractiveCLIShell:
             "  - Deck View: '/deck' (Display deck list and mana curve)\n"
             "  - Dedupe: '/dedupe' (Toggle oracle duplicate filtering ON/OFF)\n"
             "  - Ingest: '/ingest <path>' (Run background corpus ingestion)\n"
+            "  - Sync: '/sync [type]' (Sync Scryfall bulk corpora and run ingestion)\n"
             "  - Exit: ':quit', ':q', or 'exit'\n"
             "--------------------------------------------------------------------------------\n"
         )
@@ -150,6 +151,16 @@ class InteractiveCLIShell:
                 self.append_output(f"\n🚀 Started background ingestion for: {target_desc}\n")
             except Exception as e:
                 self.append_output(f"\n⚠️ Failed to start background ingestion: {e}\n")
+            return
+
+        if lower_text == "/sync" or user_text.startswith("/sync "):
+            corpus_type = user_text.split(" ", 1)[1].strip() if len(user_text.split(" ", 1)) > 1 else None
+            try:
+                self.session.trigger_background_sync(corpus_type)
+                target_desc = corpus_type if corpus_type else "all corpora (oracle_cards, rulings, oracle_tags)"
+                self.append_output(f"\n🔄 Started background sync & ingestion for: {target_desc}\n")
+            except Exception as e:
+                self.append_output(f"\n⚠️ Failed to start background sync: {e}\n")
             return
 
         if user_text.startswith("/ai "):

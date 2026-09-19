@@ -57,3 +57,15 @@ This document records key architectural decisions, rationale, and trade-offs for
   2. Maintain architectural extensibility to support **`default_cards`** optionally for collector-oriented workflows.
   3. Implement short-term post-processing deduplication by `oracle_id` in [`CardSearchEngine.vector_search()`](../search/engine.py:13) ([`search/engine.py`](../search/engine.py:6)) when querying reprint-heavy corpora, ensuring clean search results prior to a full database rebuild.
 - **Consequence**: Keeps search relevance high, reduces search noise, and adheres to modular, agnostic design principles ([`docs/DECISIONS.md`](DECISIONS.md:1)) while supporting diverse ingestion sources.
+
+---
+
+## 7. Unified Data Download Subsystem & Agnostic Downloader
+
+- **Context**: Automated retrieval of Scryfall bulk data required robust rate-limiting, header compliance, streaming decompression, and timestamp-based freshness tracking.
+- **Decision**: 
+  1. Implemented abstract base interfaces (`BaseDownloader`, `BaseDataProvider`) in [`ingestion/sources/base.py`](../ingestion/sources/base.py:1).
+  2. Implemented `HttpDownloader` using standard library `urllib` and `zlib.decompressobj()` for on-the-fly streaming gzip decompression without intermediate `.gz` disk writes.
+  3. Implemented `ScryfallClient` adhering to Scryfall API rate limits (100ms intervals, 429 exponential backoffs) and required headers (`User-Agent`, `Accept`).
+  4. Implemented `CorpusSyncManager` managing corpus synchronization and manifest tracking (`corpus/.manifest.json`).
+- **Consequence**: Automated data acquisition with flat memory usage, robust telemetry integration, and seamless UI/CLI synchronization support.

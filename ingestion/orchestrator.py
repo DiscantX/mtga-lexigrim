@@ -11,6 +11,7 @@ from ingestion.pipeline import IngestionPipeline
 from ingestion.pipelines.rules_pipeline import RulesIngestionPipeline
 from ingestion.pipelines.rulings_pipeline import RulingsIngestionPipeline
 from ingestion.pipelines.strategy_pipeline import StrategyIngestionPipeline
+from ingestion.pipelines.oracle_tags_pipeline import OracleTagsIngestionPipeline
 
 logger = logging.getLogger(__name__)
 
@@ -83,6 +84,21 @@ class IngestionOrchestrator:
                 self.progress_callback(100.0, "Idle", "Rulings ingestion complete.")
             return
 
+        if "oracle-tags" in path_lower or "oracle_tags" in path_lower:
+            logger.info(f"Detected oracle tags file at '{path}'. Running OracleTagsIngestionPipeline...")
+            if self.progress_callback:
+                self.progress_callback(10.0, "Running", f"Ingesting oracle tags from {path}")
+            pipeline = OracleTagsIngestionPipeline(
+                vector_store=self.vector_store,
+                embedding_service=self.embedding_service,
+                timer=self.timer,
+                settings=self.settings
+            )
+            pipeline.run(file_path=path, force_recreate=force)
+            if self.progress_callback:
+                self.progress_callback(100.0, "Idle", "Oracle tags ingestion complete.")
+            return
+
         # Default fallback: Card corpus jsonl
         logger.info(f"Detected card corpus file at '{path}'. Running IngestionPipeline...")
         if self.progress_callback:
@@ -110,8 +126,8 @@ class IngestionOrchestrator:
             logger.info(f"Auto-discovered rules file: {rf}")
             self.detect_and_run(rf, force=force)
 
-        # 2. Card corpus files (.jsonl excluding rulings)
-        jsonl_files = [f for f in glob.glob(os.path.join(corpus_dir, "*.jsonl")) if "rulings" not in f.lower()]
+        # 2. Card corpus files (.jsonl excluding rulings and oracle-tags)
+        jsonl_files = [f for f in glob.glob(os.path.join(corpus_dir, "*.jsonl")) if "rulings" not in f.lower() and "oracle-tags" not in f.lower() and "oracle_tags" not in f.lower()]
         for jf in jsonl_files:
             logger.info(f"Auto-discovered card corpus file: {jf}")
             self.detect_and_run(jf, force=force)
@@ -122,7 +138,13 @@ class IngestionOrchestrator:
             logger.info(f"Auto-discovered rulings file: {rlf}")
             self.detect_and_run(rlf, force=force)
 
-        # 4. Strategy directory
+        # 4. Oracle tags files
+        tag_files = glob.glob(os.path.join(corpus_dir, "*oracle-tags*.jsonl")) + glob.glob(os.path.join(corpus_dir, "*oracle_tags*.jsonl"))
+        for tf in tag_files:
+            logger.info(f"Auto-discovered oracle tags file: {tf}")
+            self.detect_and_run(tf, force=force)
+
+        # 5. Strategy directory
         strategy_dir = os.path.join(corpus_dir, "strategy")
         if os.path.exists(strategy_dir) and os.path.isdir(strategy_dir):
             logger.info(f"Auto-discovered strategy directory: {strategy_dir}")

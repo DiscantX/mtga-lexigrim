@@ -116,6 +116,78 @@ class LexiGrimSession:
         self._active_ingestion_thread = threading.Thread(target=run_ingestion_thread, daemon=True)
         self._active_ingestion_thread.start()
 
+    def trigger_background_sync(self, corpus_type: Optional[str] = None, force: bool = False) -> None:
+        """Launch background corpus synchronization using CorpusSyncManager, followed by ingestion."""
+        if self._active_ingestion_thread and self._active_ingestion_thread.is_alive():
+            raise RuntimeError("Ingestion or sync is already running!")
+            
+        self.is_ingesting = True
+        self.ingestion_progress = 0.0
+        self.ingestion_speed = "0.0 items/s"
+        target_desc = corpus_type if corpus_type else "all corpora (oracle_cards, rulings, oracle_tags)"
+        self.ingestion_message = f"Starting synchronization for {target_desc}"
+
+        def run_sync_thread():
+            try:
+                from ingestion.sources.sync import CorpusSyncManager
+                
+                def progress_callback(percentage: float, speed: str, msg: str):
+                    self.ingestion_progress = percentage
+                    self.ingestion_speed = speed
+                    self.ingestion_message = msg
+                    self.ingestion_progress_queue.put({
+                        "type": "progress",
+                        "percentage": percentage,
+                        "speed": speed,
+                        "message": msg
+                    })
+
+                sync_manager = CorpusSyncManager()
+                if corpus_type:
+                    synced_path = sync_manager.sync_corpus(bulk_type=corpus_type, force=force, progress_callback=progress_callback)
+                    self.ingestion_message = f"Sync complete. Starting ingestion for {corpus_type}..."
+                    orchestrator = IngestionOrchestrator(
+                        vector_store=self.search_engine.vector_store,
+                        embedding_service=self.search_engine.embedding_service,
+                        timer=IngestionTimer(),
+                        settings=self.settings,
+                        progress_callback=progress_callback
+                    )
+                    orchestrator.detect_and_run(synced_path, force=force)
+                else:
+                    synced_dict = sync_manager.sync_all(force=force, progress_callback=progress_callback)
+                    self.ingestion_message = "Sync complete. Starting full ingestion..."
+                    orchestrator = IngestionOrchestrator(
+                        vector_store=self.search_engine.vector_store,
+                        embedding_service=self.search_engine.embedding_service,
+                        timer=IngestionTimer(),
+                        settings=self.settings,
+                        progress_callback=progress_callback
+                    )
+                    orchestrator.run_all(force=force)
+
+                self.is_ingesting = False
+                self.ingestion_progress = 100.0
+                self.ingestion_message = "Corpus sync & ingestion completed successfully."
+                self.ingestion_progress_queue.put({
+                    "type": "complete",
+                    "percentage": 100.0,
+                    "speed": "Idle",
+                    "message": "Corpus sync & ingestion completed successfully."
+                })
+            except Exception as e:
+                self.is_ingesting = False
+                self.ingestion_message = f"Sync/Ingestion failed: {e}"
+                self.ingestion_progress_queue.put({
+                    "type": "error",
+                    "percentage": self.ingestion_progress,
+                    "speed": "Error",
+                    "message": str(e)
+                })
+
+        self._active_ingestion_thread = threading.Thread(target=run_sync_thread, daemon=True)
+        self._active_ingestion_thread.start()
+
     def stream_ai_chat_response(self, user_prompt: str):
         """Streaming AI chat response generator prepared for Phase 2 Google Gemini integration."""
         self.chat_history.append({"role": "user", "content": user_prompt})

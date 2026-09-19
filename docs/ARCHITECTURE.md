@@ -46,8 +46,12 @@ mtga-expert/
 │
 ├── ingestion/
 │   ├── __init__.py
+│   ├── orchestrator.py          # Unified IngestionOrchestrator
 │   ├── pipeline.py              # Object-oriented IngestionPipeline (producer-consumer)
-│   └── worker.py                # Dedicated background upsert worker thread
+│   ├── worker.py                # Dedicated background upsert worker thread
+│   ├── pipelines/               # Specialized pipelines (rules, rulings, strategy, oracle_tags stub)
+│   ├── readers/                 # Stream readers (markdown, rules)
+│   └── sources/                 # Unified Data Acquisition & Download Subsystem (Scryfall client, downloader, sync)
 │
 ├── search/
 │   ├── __init__.py
