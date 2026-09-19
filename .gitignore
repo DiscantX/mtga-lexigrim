@@ -1,4 +1,5 @@
 # Qdrant Local Isolated Database
+# Reserved by a 3rd party. Not for use by this application.
 .qdrant_storage/
 storage/
 snapshots/
@@ -7,7 +8,7 @@ snapshots/
 # Roo/Zoo Code
 .rooignore
 
-# Raw Daata
+# Raw Data
 corpus/
 data/
 
@@ -15,3 +16,4 @@ data/
 *.pyc
 .pytest_cache/
 .venv
+docs/scryfall_api_documentation.md

@@ -74,6 +74,11 @@ mtga-expert/
 └── search.py                    # Backward-compatible search launcher bridge
 ```
 
+### Directory Usage Rules & Restrictions
+
+- **`data/`**: Reserved exclusively for pure data artifacts (such as Qdrant database storage, corpus files, etc.). **Never** place Python scripts, source code, or application logic modules inside `data/`.
+- **`storage/`**: **Reserved Directory / Forbidden for Project Use.** This directory is utilized by a 3rd party application that maintains its own Qdrant database instance. It must **not** be used by our project for any purpose whatsoever. Critically, do *not* configure or allow our Qdrant database or data artifacts to be stored in `storage/`, as doing so will cause catastrophic database conflicts between the two applications.
+
 ---
 
 ## 4. Component Architecture Details
